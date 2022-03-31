@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32317.152
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Illimat.Core", "Illimat.Core\Illimat.Core.csproj", "{8F87BBD8-6FFC-4194-AB7F-3911B7C14097}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Illimat.Core.Tests", "Illimat.Core.Tests\Illimat.Core.Tests.csproj", "{B52ECAF5-39F9-4829-AE35-3E2B626263E8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8F87BBD8-6FFC-4194-AB7F-3911B7C14097}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F87BBD8-6FFC-4194-AB7F-3911B7C14097}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F87BBD8-6FFC-4194-AB7F-3911B7C14097}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F87BBD8-6FFC-4194-AB7F-3911B7C14097}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B52ECAF5-39F9-4829-AE35-3E2B626263E8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B52ECAF5-39F9-4829-AE35-3E2B626263E8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B52ECAF5-39F9-4829-AE35-3E2B626263E8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B52ECAF5-39F9-4829-AE35-3E2B626263E8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {34F48C3F-088D-4C94-BBE7-0A19EDECADA9}
+	EndGlobalSection
+EndGlobal
