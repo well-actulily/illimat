@@ -1,30 +1,18 @@
 /**
- * Vue composable for game state management
+ * Vue composable for game state management with domain types
  */
 
 import { ref, computed, reactive } from 'vue'
+import { GameState, Player, GameField, Card, Move, DomainUtils } from '@/domain/types.js'
+import { WasmGameEngineWrapper, MockWasmGameEngine } from '@/domain/wasmContract.js'
 
 export function useGameState() {
-  // Mock game state structure (will integrate with WASM later)
-  const gameState = ref({
-    fields: [
-      { looseCards: [], stockpiles: [] },
-      { looseCards: [], stockpiles: [] },
-      { looseCards: [], stockpiles: [] },
-      { looseCards: [], stockpiles: [] }
-    ],
-    players: [
-      { hand: [], harvest: [], score: 0 },
-      { hand: [], harvest: [], score: 0 },
-      { hand: [], harvest: [], score: 0 },
-      { hand: [], harvest: [], score: 0 }
-    ],
-    currentPlayer: 0,
-    illimatRotation: 0,
-    okusPositions: [true, true, true, true], // Which fields have okus
-    scores: [0, 0, 0, 0],
-    gamePhase: 'playing' // 'playing', 'ended'
-  })
+  // Game state using domain types
+  const gameState = ref(null)
+  
+  // WASM engine (use mock for development)
+  const wasmEngine = ref(null)
+  const isWasmReady = ref(false)
   
   // Game configuration
   const gameConfig = reactive({
@@ -34,71 +22,120 @@ export function useGameState() {
   })
   
   /**
-   * Create a new game with sample data for testing
+   * Initialize WASM engine (or mock for development)
    */
-  const createTestGame = () => {
-    // Sample cards for testing the pile system
+  const initializeEngine = async () => {
+    try {
+      // TODO: Load real WASM module
+      // const wasmModule = await import('../../backend/pkg/illimat.js')
+      // await wasmModule.default()
+      // wasmEngine.value = new WasmGameEngineWrapper(new wasmModule.WasmGameEngine())
+      
+      // For now, use mock engine
+      wasmEngine.value = new WasmGameEngineWrapper(new MockWasmGameEngine())
+      isWasmReady.value = true
+    } catch (error) {
+      console.error('Failed to initialize WASM engine:', error)
+      throw error
+    }
+  }
+  
+  /**
+   * Create a new game with proper domain types
+   */
+  const createNewGame = async (config = {}) => {
+    if (!wasmEngine.value) {
+      await initializeEngine()
+    }
+    
+    const gameConfig = {
+      player_count: config.playerCount || 2,
+      use_stars_suit: config.useStarsSuit ?? (config.playerCount > 3),
+      enable_luminaries: config.enableLuminaries ?? true,
+      luminary_expansions: config.luminaryExpansions || ['core'],
+      beginner_mode: config.beginnerMode ?? false
+    }
+    
+    try {
+      const newGameState = await wasmEngine.value.initializeGame(gameConfig)
+      gameState.value = newGameState
+      return newGameState
+    } catch (error) {
+      console.error('Failed to create new game:', error)
+      throw error
+    }
+  }
+  
+  /**
+   * Create a test game with sample data for UI development
+   */
+  const createTestGame = async () => {
+    // Create sample cards using domain types
     const sampleCards = [
-      { id: 1, rank: '5', suit: 'Spring', value: 5 },
-      { id: 2, rank: 'Q', suit: 'Stars', value: 12 },
-      { id: 3, rank: '8', suit: 'Autumn', value: 8 },
-      { id: 4, rank: 'F', suit: 'Winter', value: 1 },
-      { id: 5, rank: '3', suit: 'Summer', value: 3 },
-      { id: 6, rank: 'K', suit: 'Spring', value: 13 },
-      { id: 7, rank: '7', suit: 'Winter', value: 7 },
-      { id: 8, rank: 'N', suit: 'Stars', value: 11 }
+      new Card({ id: 1, rank: '5', suit: 'Spring', value: 5 }),
+      new Card({ id: 2, rank: 'Q', suit: 'Stars', value: 12 }),
+      new Card({ id: 3, rank: '8', suit: 'Autumn', value: 8 }),
+      new Card({ id: 4, rank: 'F', suit: 'Winter', value: 1 }),
+      new Card({ id: 5, rank: '3', suit: 'Summer', value: 3 }),
+      new Card({ id: 6, rank: 'K', suit: 'Spring', value: 13 }),
+      new Card({ id: 7, rank: '7', suit: 'Winter', value: 7 }),
+      new Card({ id: 8, rank: 'N', suit: 'Stars', value: 11 })
     ]
     
-    gameState.value = {
+    // Create test game state with domain types
+    gameState.value = new GameState({
+      phase: 'playing',
+      currentPlayer: 0,
+      roundNumber: 1,
       fields: [
-        { 
-          looseCards: [sampleCards[0], sampleCards[1]], 
-          stockpiles: [
-            { cards: [sampleCards[2], sampleCards[3]] }
-          ] 
-        },
-        { 
-          looseCards: [sampleCards[4]], 
-          stockpiles: [] 
-        },
-        { 
-          looseCards: [], 
-          stockpiles: [
-            { cards: [sampleCards[5]] }
-          ] 
-        },
-        { 
-          looseCards: [sampleCards[6], sampleCards[7]], 
-          stockpiles: [] 
-        }
+        new GameField({ 
+          looseCards: [sampleCards[0], sampleCards[1]],
+          season: 'Winter',
+          hasOkus: true
+        }),
+        new GameField({ 
+          looseCards: [sampleCards[4]],
+          season: 'Spring' 
+        }),
+        new GameField({ 
+          season: 'Summer',
+          hasOkus: true
+        }),
+        new GameField({ 
+          looseCards: [sampleCards[6], sampleCards[7]],
+          season: 'Autumn'
+        })
       ],
       players: [
-        { 
+        new Player({ 
+          id: 0,
+          name: 'Player 1',
           hand: [sampleCards[0], sampleCards[1], sampleCards[2], sampleCards[3]], 
           harvest: [sampleCards[4]], 
           score: 2 
-        },
-        { 
+        }),
+        new Player({ 
+          id: 1,
+          name: 'Player 2',
           hand: [sampleCards[4], sampleCards[5], sampleCards[6]], 
           harvest: [sampleCards[7]], 
-          score: 1 
-        },
-        { hand: [], harvest: [], score: 0 },
-        { hand: [], harvest: [], score: 0 }
+          score: 1,
+          isAI: true
+        })
       ],
-      currentPlayer: 0,
-      illimatRotation: 0,
       okusPositions: [true, false, true, false],
-      scores: [2, 1, 0, 0],
-      gamePhase: 'playing'
-    }
+      okusOnIllimat: 2
+    })
+    
+    return gameState.value
   }
   
   /**
    * Get current player data
    */
   const currentPlayer = computed(() => {
-    return gameState.value.players[gameState.value.currentPlayer]
+    if (!gameState.value) return null
+    return gameState.value.getCurrentPlayer()
   })
   
   /**
@@ -109,45 +146,38 @@ export function useGameState() {
   })
   
   /**
-   * Get all visible cards (for rendering)
+   * Get all field cards for 3D rendering
    */
-  const allVisibleCards = computed(() => {
+  const allFieldCards = computed(() => {
+    if (!gameState.value) return []
+    
     const cards = []
     
-    // Field cards
     gameState.value.fields.forEach((field, fieldIndex) => {
+      // Loose cards
       field.looseCards.forEach((card, cardIndex) => {
         cards.push({
-          ...card,
+          card,
           location: 'field',
           fieldIndex,
           cardIndex,
-          isLoose: true
+          isLoose: true,
+          position: { x: 0, y: 0, z: 0 } // TODO: Calculate 3D position
         })
       })
       
+      // Stockpiled cards
       field.stockpiles.forEach((stockpile, stockpileIndex) => {
         stockpile.cards.forEach((card, cardIndex) => {
           cards.push({
-            ...card,
+            card,
             location: 'field',
             fieldIndex,
             stockpileIndex,
             cardIndex,
-            isLoose: false
+            isLoose: false,
+            position: { x: 0, y: 0, z: 0 } // TODO: Calculate 3D position
           })
-        })
-      })
-    })
-    
-    // Player hands
-    gameState.value.players.forEach((player, playerIndex) => {
-      player.hand.forEach((card, cardIndex) => {
-        cards.push({
-          ...card,
-          location: 'hand',
-          playerIndex,
-          cardIndex
         })
       })
     })
@@ -156,54 +186,61 @@ export function useGameState() {
   })
   
   /**
-   * Get field season based on Illimat rotation
+   * Get field season based on Illimat orientation
    */
   const getFieldSeason = (fieldIndex) => {
-    const seasons = ['Winter', 'Spring', 'Summer', 'Autumn']
-    const rotation = Math.floor(gameState.value.illimatRotation / 90) % 4
-    return seasons[(fieldIndex + rotation) % 4]
+    if (!gameState.value) return 'Winter'
+    return gameState.value.getFieldSeason(fieldIndex)
   }
   
   /**
-   * Apply a move (placeholder for WASM integration)
+   * Apply a move using WASM engine
    */
   const applyMove = async (playerId, move) => {
+    if (!wasmEngine.value || !gameState.value) {
+      throw new Error('Game engine not ready')
+    }
+    
     try {
-      // TODO: Integrate with WASM backend
-      console.log('Applying move:', { playerId, move })
-      
-      // For now, just simulate move success
-      return { success: true, newState: gameState.value }
+      const moveObj = move instanceof Move ? move : Move.fromJSON(move)
+      const updatedState = await wasmEngine.value.applyMove(gameState.value, playerId, moveObj)
+      gameState.value = updatedState
+      return { success: true, newState: updatedState }
     } catch (error) {
+      console.error('Failed to apply move:', error)
       return { success: false, error: error.message }
     }
   }
   
   /**
-   * Validate a move (placeholder for WASM integration)
+   * Validate a move using WASM engine
    */
   const validateMove = async (playerId, move) => {
+    if (!wasmEngine.value || !gameState.value) {
+      throw new Error('Game engine not ready')
+    }
+    
     try {
-      // TODO: Integrate with WASM backend
-      console.log('Validating move:', { playerId, move })
-      
-      // For now, just simulate validation
-      return { valid: true, feedback: 'Move is valid' }
+      const moveObj = move instanceof Move ? move : Move.fromJSON(move)
+      const result = await wasmEngine.value.validateMove(gameState.value, playerId, moveObj)
+      return { valid: result.is_valid, feedback: result.error_message || 'Move is valid' }
     } catch (error) {
+      console.error('Failed to validate move:', error)
       return { valid: false, feedback: error.message }
     }
   }
   
   /**
-   * Get legal moves (placeholder for WASM integration)
+   * Get legal moves using WASM engine
    */
   const getLegalMoves = async (playerId) => {
-    try {
-      // TODO: Integrate with WASM backend
-      console.log('Getting legal moves for player:', playerId)
-      
-      // For now, return empty array
+    if (!wasmEngine.value || !gameState.value) {
       return []
+    }
+    
+    try {
+      const moves = await wasmEngine.value.getLegalMoves(gameState.value, playerId)
+      return moves
     } catch (error) {
       console.error('Error getting legal moves:', error)
       return []
@@ -211,34 +248,59 @@ export function useGameState() {
   }
   
   /**
-   * Advance to next season
+   * Get AI move using WASM engine
    */
-  const nextSeason = () => {
-    gameState.value.illimatRotation = (gameState.value.illimatRotation + 90) % 360
+  const getAIMove = async (playerId, timeLimit = 3000) => {
+    if (!wasmEngine.value || !gameState.value) {
+      throw new Error('Game engine not ready')
+    }
+    
+    try {
+      const move = await wasmEngine.value.getBestMove(gameState.value, playerId, timeLimit)
+      return move
+    } catch (error) {
+      console.error('Failed to get AI move:', error)
+      throw error
+    }
   }
   
   /**
-   * End current player's turn
+   * Advance to next season (for manual testing)
+   */
+  const nextSeason = () => {
+    if (!gameState.value) return
+    gameState.value.illimatOrientation = (gameState.value.illimatOrientation + 1) % 4
+  }
+  
+  /**
+   * End current player's turn (for manual testing)
    */
   const endTurn = () => {
-    gameState.value.currentPlayer = (gameState.value.currentPlayer + 1) % gameConfig.playerCount
+    if (!gameState.value) return
+    gameState.value.currentPlayer = gameState.value.getNextPlayer()
   }
   
   return {
     // State
     gameState,
     gameConfig,
+    isWasmReady,
     
     // Computed properties
     currentPlayer,
     currentPlayerHand,
-    allVisibleCards,
+    allFieldCards,
+    
+    // Game initialization
+    initializeEngine,
+    createNewGame,
+    createTestGame,
     
     // Game actions
-    createTestGame,
     applyMove,
     validateMove,
     getLegalMoves,
+    getAIMove,
     nextSeason,
     endTurn,
     

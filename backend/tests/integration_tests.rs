@@ -51,8 +51,9 @@ fn test_basic_game_actions() {
         // Test should validate the result makes sense, not assume success
         match result {
             Ok(_) => {
-                // If successful, verify cards moved correctly
-                assert_eq!(state.player_hands[0].len(), initial_hand_size - 1, "Hand should lose a card");
+                // With draw-back-to-4 implemented, hand size should remain 4 (played 1, drew 1 back)
+                let expected_hand_size = if state.deck.len() > 0 { 4 } else { initial_hand_size - 1 };
+                assert_eq!(state.player_hands[0].len(), expected_hand_size, "Hand should draw back to 4 cards");
                 assert_eq!(state.field_cards[0].len(), initial_field_size + 1, "Field should gain a card");
                 assert!(state.field_cards[0].contains(&sow_card), "Card should be in field");
             }

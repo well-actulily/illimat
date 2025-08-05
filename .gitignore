@@ -19,6 +19,8 @@
 backend/target/
 backend/exports/
 backend/saves/
+backend/benchmark_results.txt
+backend/flamegraph_test_input.txt
 
 # ========================================
 # OS-SPECIFIC IGNORE (macOS)

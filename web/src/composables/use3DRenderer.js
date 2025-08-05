@@ -65,7 +65,16 @@ export function use3DRenderer() {
    * Get field boundaries in 3D space
    */
   const getFieldBounds = (fieldIndex) => {
-    if (!renderer3D.value) return null
+    if (!renderer3D.value) {
+      // Default field bounds for fallback during initialization
+      const defaultBounds = [
+        { x: 200, y: 125, width: 80, height: 50 }, // Right field
+        { x: 125, y: 50, width: 50, height: 80 },  // Top field  
+        { x: 20, y: 125, width: 80, height: 50 },  // Left field
+        { x: 125, y: 200, width: 50, height: 80 }  // Bottom field
+      ]
+      return defaultBounds[fieldIndex] || defaultBounds[0]
+    }
     return renderer3D.value.getFieldBounds(fieldIndex)
   }
   

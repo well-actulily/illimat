@@ -48,10 +48,23 @@ impl IllimatState {
         let mut deck = Self::create_deck(config.use_stars_suit);
         deck.shuffle(&mut rng);
         
-        // Deal initial hands (4 cards per player)
+        // Choose random dealer first (needed for proper dealing)
+        let dealer = PlayerId(rng.gen_range(0..config.player_count));
+        
+        // Deal initial hands following official Illimat rules:
+        // - Player to left of dealer gets 3 cards and goes first
+        // - All other players get 4 cards
         let mut player_hands = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        for _ in 0..4 {
-            for player_id in 0..config.player_count {
+        let first_player = PlayerId((dealer.0 + 1) % config.player_count);
+        
+        for player_id in 0..config.player_count {
+            let cards_to_deal = if PlayerId(player_id) == first_player { 
+                3  // First player (dealer's left) gets 3 cards
+            } else { 
+                4  // All other players get 4 cards
+            };
+            
+            for _ in 0..cards_to_deal {
                 if let Some(card) = deck.pop() {
                     player_hands[player_id as usize].push(card);
                 }
@@ -67,9 +80,6 @@ impl IllimatState {
                 }
             }
         }
-        
-        // Choose random dealer
-        let dealer = PlayerId(rng.gen_range(0..config.player_count));
         
         // Initialize field seasons (start with field 0 as Spring)
         let illimat_orientation = 0;
@@ -130,6 +140,11 @@ impl IllimatState {
                     targets,
                 )?;
                 
+                // Collect okus if field was cleared and okus are available
+                if field_cleared {
+                    self.handle_field_cleared(field, self.current_player);
+                }
+                
                 self.advance_turn();
                 Ok(field_cleared)
             },
@@ -179,6 +194,7 @@ impl IllimatState {
     /// Check if the round should end (all hands empty or deck exhausted)
     pub fn should_end_round(&self) -> bool {
         // Round ends when all players have empty hands
+        // With draw-back-to-4 implemented, hands will only be empty when deck is also exhausted
         self.player_hands[..self.config.player_count as usize]
             .iter()
             .all(|hand| hand.is_empty())
@@ -257,7 +273,50 @@ impl IllimatState {
     // Private helper methods
     
     fn advance_turn(&mut self) {
+        // Draw back to 4 cards for current player before advancing to next player
+        self.draw_back_to_four_cards(self.current_player);
+        
+        // Advance to next player
         self.current_player = PlayerId((self.current_player.0 + 1) % self.config.player_count);
+    }
+    
+    /// Draw cards to bring player's hand back to 4 cards (fundamental Illimat rule)
+    fn draw_back_to_four_cards(&mut self, player: PlayerId) {
+        let current_hand_size = self.player_hands[player.0 as usize].len();
+        let target_hand_size = 4;
+        
+        if current_hand_size < target_hand_size {
+            let cards_to_draw = target_hand_size - current_hand_size;
+            
+            for _ in 0..cards_to_draw {
+                if let Some(card) = self.deck.pop() {
+                    self.player_hands[player.0 as usize].push(card);
+                } else {
+                    // Deck exhausted - no more cards to draw
+                    break;
+                }
+            }
+        }
+        // If player has more than 4 cards, they keep them (no discarding rule in Illimat)
+    }
+    
+    /// Handle field clearing: collect available okus and reseed if needed
+    fn handle_field_cleared(&mut self, _field: FieldId, player: PlayerId) {
+        // Collect all available okus when a field is cleared
+        let available_okus = OkusManager::get_available_okus(&self.okus_positions);
+        
+        if !available_okus.is_empty() {
+            // Collect all available okus for the player who cleared the field
+            for &okus in &available_okus {
+                self.okus_positions[okus as usize] = OkusPosition::WithPlayer(player);
+            }
+            
+            // Note: Console display should show okus collection, but we don't handle
+            // console output in the core game logic
+        }
+        
+        // TODO: Implement field reseeding with 3 cards per the rules
+        // This would require careful handling to avoid infinite loops if deck is empty
     }
     
     fn create_deck(use_stars_suit: bool) -> Vec<Card> {
@@ -339,9 +398,20 @@ mod tests {
         assert_eq!(state.round_number, 1);
         assert_eq!(state.turn_number, 1);
         
-        // Each player should have 4 cards
-        assert_eq!(state.player_hands[0].len(), 4);
-        assert_eq!(state.player_hands[1].len(), 4);
+        // Verify correct Illimat dealing rules:
+        // First player (dealer's left) gets 3 cards, others get 4 cards
+        let first_player = PlayerId((state.dealer.0 + 1) % state.config.player_count);
+        
+        for player_id in 0..state.config.player_count {
+            let expected_cards = if PlayerId(player_id) == first_player { 
+                3  // First player gets 3 cards
+            } else { 
+                4  // All other players get 4 cards
+            };
+            assert_eq!(state.player_hands[player_id as usize].len(), expected_cards,
+                      "Player {} should have {} cards (first_player={})", 
+                      player_id, expected_cards, first_player.0);
+        }
         
         // Each field should have 3 cards (proper Illimat seeding)
         for field_cards in &state.field_cards {
@@ -644,13 +714,18 @@ mod tests {
             assert_eq!(game.current_player, expected_first_player);
             assert_eq!(game.total_scores, [0, 0, 0, 0]);
             
-            // Each player should have 4 cards initially
-            for i in 0..2 {
-                assert_eq!(game.player_hands[i].len(), 4, "Player {} should have 4 cards", i);
+            // Verify correct Illimat dealing: first player gets 3 cards, others get 4
+            let first_player = PlayerId((game.dealer.0 + 1) % game.config.player_count);
+            for i in 0..game.config.player_count {
+                let expected_cards = if PlayerId(i) == first_player { 3 } else { 4 };
+                assert_eq!(game.player_hands[i as usize].len(), expected_cards, 
+                          "Player {} should have {} cards (first_player={})", 
+                          i, expected_cards, first_player.0);
             }
             
             // Simulate a complete round by exhausting all player hands
-            let max_turns = 20; // Should only take 8 turns for 2 players with 4 cards each
+            // With draw-back-to-4 implemented, this takes much longer (deck must be exhausted)
+            let max_turns = 100; // 2 players, ~44 cards in deck, need enough turns to exhaust deck
             let mut turn_count = 0;
             
             while !game.should_end_round() && turn_count < max_turns {

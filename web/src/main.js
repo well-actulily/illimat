@@ -1,79 +1,23 @@
 /**
- * Illimat Web Frontend - Main Entry Point
+ * Illimat Web Frontend - Vue 3 Entry Point
  * 
- * This module initializes the web application and handles WebAssembly integration
- * with the Rust backend for game logic and AI.
+ * This module initializes the Vue 3 application with WebAssembly integration
+ * and the 3D isometric rendering system.
  */
 
-console.log('🃏 Illimat Web Frontend initializing...');
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import App from './App.vue'
 
-class IllimatApp {
-    constructor() {
-        this.wasmModule = null;
-        this.gameState = null;
-        this.isWasmReady = false;
-    }
+console.log('🃏 Illimat Vue 3 Frontend initializing...')
 
-    async initialize() {
-        try {
-            await this.loadWasm();
-            await this.initializeUI();
-            console.log('✨ Illimat app ready');
-        } catch (error) {
-            console.error('Failed to initialize Illimat app:', error);
-            this.showError('Failed to load WebAssembly module. Please refresh and try again.');
-        }
-    }
+// Create Vue app with Pinia store
+const app = createApp(App)
+const pinia = createPinia()
 
-    async loadWasm() {
-        // TODO: Load WebAssembly module from backend build
-        console.log('🦀 Loading Rust WebAssembly module...');
-        
-        // Placeholder for WASM loading
-        // In the future, this will load the compiled Rust backend
-        // import wasmInit, { WasmGameEngine } from '../pkg/illimat.js';
-        // await wasmInit();
-        // this.wasmModule = new WasmGameEngine();
-        
-        // Simulate loading for now
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        this.isWasmReady = true;
-        console.log('✅ WebAssembly module loaded');
-    }
+app.use(pinia)
 
-    async initializeUI() {
-        console.log('🎨 Initializing UI...');
-        
-        const statusElement = document.querySelector('.status');
-        if (statusElement) {
-            statusElement.textContent = this.isWasmReady 
-                ? 'Ready to play!' 
-                : 'WebAssembly not available - using fallback mode';
-        }
+// Mount the application
+app.mount('#app')
 
-        // TODO: Initialize game UI components
-        // - Game board rendering
-        // - Card interaction system
-        // - WebSocket connection for multiplayer
-        // - AI move calculation interface
-    }
-
-    showError(message) {
-        const statusElement = document.querySelector('.status');
-        if (statusElement) {
-            statusElement.textContent = `❌ Error: ${message}`;
-            statusElement.style.color = '#aa1133';
-        }
-    }
-}
-
-// Initialize the application when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const app = new IllimatApp();
-        app.initialize();
-    });
-} else {
-    const app = new IllimatApp();
-    app.initialize();
-}
+console.log('✨ Vue 3 Illimat app mounted successfully')

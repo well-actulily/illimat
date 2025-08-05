@@ -832,16 +832,10 @@ fn handle_harvest_action(game: &mut IllimatState, undo_manager: &mut UndoManager
     
     let selected_field = FieldId((field_index - 1) as u8);
     
-    // Show harvest combinations for selected field
-    let _target_values = if selected_card.rank() == illimat_core::game::card::Rank::Fool {
-        vec![1, 14]
-    } else {
-        vec![get_card_value(selected_card)]
-    };
-    
+    // Find harvest combinations and separate direct matches from combinations
     let all_combinations = find_harvest_combinations(
         &game.field_cards[selected_field.0 as usize],
-        &game.field_stockpiles[selected_field.0 as usize],
+        &game.field_stockpiles[selected_field.0 as usize], 
         selected_card
     );
     
@@ -849,48 +843,116 @@ fn handle_harvest_action(game: &mut IllimatState, undo_manager: &mut UndoManager
         return Err("No valid combinations in selected field".to_string());
     }
     
-    println!("\nAvailable harvest combinations:");
-    for (i, combination) in all_combinations.iter().enumerate() {
-        print!("  {}: ", i + 1);
-        for (j, card) in combination.iter().enumerate() {
+    // Get target value(s) for the played card
+    let target_values = if selected_card.rank() == illimat_core::game::card::Rank::Fool {
+        vec![1, 14]
+    } else {
+        vec![get_card_value(selected_card)]
+    };
+    
+    // Separate direct matches from combinations for each target value
+    let mut direct_matches = Vec::new();
+    let mut combination_matches = Vec::new();
+    
+    for &target_value in &target_values {
+        for combination in &all_combinations {
+            if combination.len() == 1 && get_card_value(combination[0]) == target_value {
+                // Single card with exact value match - direct match
+                direct_matches.push(combination[0]);
+            } else if combination.iter().map(|c| get_card_value(*c)).sum::<u8>() == target_value {
+                // Multi-card combination or stockpile - combination match
+                combination_matches.push(combination.clone());
+            }
+        }
+    }
+    
+    let selected_targets = if !direct_matches.is_empty() && combination_matches.is_empty() {
+        // Only direct matches available - auto-collect all matching values
+        println!("\n🔄 Auto-collecting all cards matching {} (value {}):", 
+                 selected_card, get_card_value(selected_card));
+        for card in &direct_matches {
+            println!("  • {}", card);
+        }
+        direct_matches
+    } else if direct_matches.is_empty() && combination_matches.len() == 1 {
+        // Only one combination match available - auto-select it
+        let combo = &combination_matches[0];
+        println!("\n🔄 Auto-selecting only available combination:");
+        print!("  • ");
+        for (j, card) in combo.iter().enumerate() {
             if j > 0 { print!(" + "); }
             print!("{}", card);
         }
-        let sum: u8 = combination.iter().map(|c| 
-            if c.rank() == illimat_core::game::card::Rank::Fool { 
-                // For display, show fool as 1 unless it needs to be 14
-                1 
-            } else { 
-                c.value() 
-            }
-        ).sum();
+        let sum: u8 = combo.iter().map(|c| get_card_value(*c)).sum();
         println!(" = {}", sum);
-    }
-    
-    // Get combination selection
-    print!("Select combination to harvest (1-{}): ", all_combinations.len());
-    io::stdout().flush().unwrap();
-    
-    let mut input = String::new();
-    match io::stdin().read_line(&mut input) {
-        Ok(0) => return Err("EOF reached".to_string()),
-        Ok(_) => {},
-        Err(_) => return Err("Failed to read input".to_string()),
-    }
-    
-    let trimmed_input = input.trim();
-    if trimmed_input.is_empty() {
-        return Err("Empty input".to_string());
-    }
-    
-    let combo_index: usize = trimmed_input.parse()
-        .map_err(|_| format!("Invalid combination number: '{}'", trimmed_input))?;
-    
-    if combo_index == 0 || combo_index > all_combinations.len() {
-        return Err(format!("Invalid combination selection: {} (valid range: 1-{})", combo_index, all_combinations.len()));
-    }
-    
-    let selected_targets = all_combinations[combo_index - 1].clone();
+        combo.clone()
+    } else {
+        // Multiple options available - prompt for selection
+        println!("\nAvailable harvest combinations:");
+        
+        if !direct_matches.is_empty() {
+            println!("  1: Auto-collect all exact matches ({})", direct_matches.len());
+            print!("     ");
+            for (i, card) in direct_matches.iter().enumerate() {
+                if i > 0 { print!(", "); }
+                print!("{}", card);
+            }
+            println!();
+        }
+        
+        let combination_start_index = if direct_matches.is_empty() { 1 } else { 2 };
+        for (i, combination) in combination_matches.iter().enumerate() {
+            print!("  {}: ", combination_start_index + i);
+            for (j, card) in combination.iter().enumerate() {
+                if j > 0 { print!(" + "); }
+                print!("{}", card);
+            }
+            let sum: u8 = combination.iter().map(|c| get_card_value(*c)).sum();
+            println!(" = {}", sum);
+        }
+        
+        let total_options = if direct_matches.is_empty() { 
+            combination_matches.len() 
+        } else { 
+            1 + combination_matches.len() 
+        };
+        
+        // Get combination selection
+        print!("Select combination to harvest (1-{}): ", total_options);
+        io::stdout().flush().unwrap();
+        
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => return Err("EOF reached".to_string()),
+            Ok(_) => {},
+            Err(_) => return Err("Failed to read input".to_string()),
+        }
+        
+        let trimmed_input = input.trim();
+        if trimmed_input.is_empty() {
+            return Err("Empty input".to_string());
+        }
+        
+        let combo_index: usize = trimmed_input.parse()
+            .map_err(|_| format!("Invalid combination number: '{}'", trimmed_input))?;
+        
+        if combo_index == 0 || combo_index > total_options {
+            return Err(format!("Invalid combination selection: {} (valid range: 1-{})", combo_index, total_options));
+        }
+        
+        if !direct_matches.is_empty() && combo_index == 1 {
+            // User selected auto-collect option
+            direct_matches
+        } else {
+            // User selected a specific combination
+            let combination_index = if direct_matches.is_empty() { 
+                combo_index - 1 
+            } else { 
+                combo_index - 2 
+            };
+            combination_matches[combination_index].clone()
+        }
+    };
     
     // Attempt the harvest
     let action = Action::Harvest {

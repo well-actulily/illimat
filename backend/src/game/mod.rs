@@ -10,6 +10,8 @@ pub mod actions;
 pub mod display;
 pub mod scoring;
 pub mod game_config;
+pub mod bitset;
+pub mod debug_cards;
 pub mod simd_optimizations;
 pub mod zero_copy;
 

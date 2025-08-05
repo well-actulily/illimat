@@ -141,16 +141,29 @@ impl ActionManager {
         card: Card,
         targets: Vec<Card>,
     ) -> Result<bool, ActionError> {
+        // Handle auto-collection for exact matches when no targets specified
+        let actual_targets = if targets.is_empty() {
+            // Auto-collect all exact value matches
+            Self::find_auto_collection_targets(
+                &field_cards[field.0 as usize],
+                &field_stockpiles[field.0 as usize],
+                card
+            )
+        } else {
+            // Use manually specified targets
+            targets
+        };
+        
         // Validate the harvest action
         Self::validate_harvest_action(
             field_cards, field_stockpiles, player_hands, field_seasons,
-            *illimat_orientation, *turn_number, player, field, card, &targets
+            *illimat_orientation, *turn_number, player, field, card, &actual_targets
         )?;
         
         // Execute the harvest
         Self::execute_harvest(
             field_cards, field_stockpiles, player_hands, player_harvests,
-            field_seasons, illimat_orientation, turn_number, player, field, card, targets
+            field_seasons, illimat_orientation, turn_number, player, field, card, actual_targets
         )
     }
     
@@ -231,7 +244,16 @@ impl ActionManager {
             });
         }
         
-        if !combinations.iter().any(|combo| Self::cards_match_exactly(combo, targets)) {
+        // Check if targets form a valid combination
+        let is_valid = if Self::is_auto_collection_targets(targets, &combinations) {
+            // Auto-collection: targets should be all exact matches combined
+            true
+        } else {
+            // Manual selection: targets should match one of the individual combinations
+            combinations.iter().any(|combo| Self::cards_match_exactly(combo, targets))
+        };
+        
+        if !is_valid {
             let valid_options: Vec<String> = combinations.iter().take(3).map(|combo| {
                 let cards_str = combo.iter()
                     .map(|c| format!("{}", c))
@@ -491,6 +513,40 @@ impl ActionManager {
         }
     }
     
+    /// Find targets for auto-collection (exact value matches only)
+    fn find_auto_collection_targets(
+        field_cards: &[Card],
+        field_stockpiles: &[Stockpile],
+        played_card: Card
+    ) -> Vec<Card> {
+        let mut targets = Vec::new();
+        
+        // Get possible values for the played card (Fool can be 1 or 14)
+        let played_values = if played_card.rank() == Rank::Fool {
+            vec![1, 14]
+        } else {
+            vec![Self::get_card_value(played_card)]
+        };
+        
+        for &target_value in &played_values {
+            // Collect exact value matches from loose cards
+            for &card in field_cards {
+                if Self::get_card_value(card) == target_value {
+                    targets.push(card);
+                }
+            }
+            
+            // Collect exact value matches from stockpiles
+            for stockpile in field_stockpiles {
+                if stockpile.value == target_value {
+                    targets.extend(stockpile.cards.clone());
+                }
+            }
+        }
+        
+        targets
+    }
+    
     fn find_harvest_combinations(
         field_cards: &[Card],
         field_stockpiles: &[Stockpile],
@@ -563,6 +619,31 @@ impl ActionManager {
         
         let mut current_combo = Vec::new();
         backtrack(available_cards, target_sum, 0, &mut current_combo, 0, combinations);
+    }
+    
+    /// Check if targets represent auto-collection (all exact value matches combined)
+    fn is_auto_collection_targets(targets: &[Card], combinations: &[Vec<Card>]) -> bool {
+        if targets.is_empty() {
+            return false;
+        }
+        
+        // Get all single-card exact matches from combinations
+        let exact_matches: Vec<Card> = combinations.iter()
+            .filter(|combo| combo.len() == 1) // Only single cards (exact matches)
+            .map(|combo| combo[0])
+            .collect();
+        
+        if exact_matches.is_empty() {
+            return false;
+        }
+        
+        // Check if targets contains exactly all the exact matches
+        let mut targets_sorted = targets.to_vec();
+        let mut matches_sorted = exact_matches;
+        targets_sorted.sort();
+        matches_sorted.sort();
+        
+        targets_sorted == matches_sorted
     }
     
     fn cards_match_exactly(combo: &[Card], targets: &[Card]) -> bool {

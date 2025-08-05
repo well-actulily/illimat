@@ -352,7 +352,6 @@ fn bench_memory_fragmentation(c: &mut Criterion) {
 /// Generate a memory profiling report
 fn memory_profile_criterion() -> Criterion {
     Criterion::default()
-        .with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
         .sample_size(20) // Reduce sample size for memory profiling
         .measurement_time(std::time::Duration::from_secs(10))
 }

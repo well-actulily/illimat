@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ab4760f6f9f558c99525d3644935a8b47bf5f638877fdb7939a68c18a22f397b # shrinks to cards = [Card(64)]
+cc 57e28aa0996f75e4f5c653a80d9790e92cb7b1a65d1e657dcfc7feb2b00ffd20 # shrinks to cards = [Card(64)]
+cc d61a6726c3c6e19ffc6cda152168232acf1e1fc8daf3d100bcaba6a6a4099103 # shrinks to cards1 = [], cards2 = [Card(64)]
+cc 0a3b7271f4aaa093641ca7da627397a5a8af742b37bc8d6f24f6b57275992d7b # shrinks to cards = [Card(75)]

@@ -9,6 +9,7 @@ use crate::game::card::{Card, Rank, Suit};
 use std::arch::x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
+#[allow(unused_imports)]
 use std::arch::aarch64::*;
 
 /// SIMD-optimized operations for card collections

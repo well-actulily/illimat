@@ -1,91 +1,48 @@
 <template>
-  <g 
-    :class="cardClasses"
-    :transform="cardTransform"
-    @mousedown="handleMouseDown"
-    @mouseover="handleMouseOver"
-    @mouseout="handleMouseOut"
-  >
-    <!-- Card body -->
-    <rect 
-      :width="cardDimensions.width"
-      :height="cardDimensions.height"
-      :rx="cardRadius"
+  <g class="game-card" :class="{ 'is-draggable': draggable, 'is-selected': selected }" 
+     @click="handleClick" @mousedown="handleMouseDown"
+     data-cy="game-card">
+    <!-- Card background -->
+    <polygon
+      :points="cardPoints"
       :fill="cardFill"
       :stroke="cardStroke"
       :stroke-width="strokeWidth"
-      class="card-body"
+      class="card-background"
     />
     
-    <!-- Mystical border for face cards -->
-    <rect 
-      v-if="isFaceCard"
-      :x="1" :y="1"
-      :width="cardDimensions.width - 2" 
-      :height="cardDimensions.height - 2"
-      :rx="cardRadius - 1"
-      fill="none"
-      :stroke="mysticalBorderColor"
-      stroke-width="0.5"
-      class="face-card-border"
-      opacity="0.8"
-    />
-    
-    <!-- Rank display -->
-    <text 
-      :x="rankPosition.x" 
-      :y="rankPosition.y"
-      :fill="rankColor"
-      :font-size="rankFontSize"
-      font-family="monospace"
-      font-weight="bold"
+    <!-- Card rank and suit -->
+    <text
+      v-if="showDetails"
+      :x="textPosition.x"
+      :y="textPosition.y"
+      :font-size="fontSize"
+      :fill="textColor"
       text-anchor="middle"
-      dominant-baseline="central"
-      class="card-rank"
+      dominant-baseline="middle"
+      class="card-text"
     >
-      {{ displayRank }}
+      {{ cardDisplay }}
     </text>
     
-    <!-- Suit symbol -->
-    <g :transform="`translate(${suitPosition.x}, ${suitPosition.y})`">
-      <SuitSymbol 
-        :suit="card.suit" 
-        :size="suitSize"
-        :glowing="isHovered || isSelected"
-      />
-    </g>
-    
-    <!-- Mystical glow effect -->
-    <rect 
-      v-if="isGlowing"
-      :width="cardDimensions.width"
-      :height="cardDimensions.height"
-      :rx="cardRadius"
-      fill="url(#cardGlow)"
-      opacity="0.4"
-      class="card-glow"
-      pointer-events="none"
-    />
-    
-    <!-- Selection indicator -->
-    <rect 
-      v-if="isSelected"
-      :width="cardDimensions.width + 2"
-      :height="cardDimensions.height + 2"
-      :x="-1" :y="-1"
-      :rx="cardRadius + 1"
-      fill="none"
-      stroke="#55cc00"
-      stroke-width="2"
-      class="selection-ring"
-      opacity="0.8"
-    />
+    <!-- Card value indicator (small number) -->
+    <text
+      v-if="showValue"
+      :x="valuePosition.x"
+      :y="valuePosition.y"
+      :font-size="valueFontSize"
+      :fill="valueColor"
+      text-anchor="middle"
+      dominant-baseline="middle"
+      class="card-value"
+    >
+      {{ card.getGameValue() }}
+    </text>
   </g>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import SuitSymbol from './SuitSymbol.vue'
+import { computed } from 'vue'
 
 const props = defineProps({
   card: {
@@ -94,7 +51,8 @@ const props = defineProps({
   },
   position: {
     type: Object,
-    default: () => ({ x: 0, y: 0, z: 0, rotation: 0 })
+    required: true,
+    // Expected: { corners: [[x,y], [x,y], [x,y], [x,y]] }
   },
   draggable: {
     type: Boolean,
@@ -104,183 +62,134 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  showDetails: {
+    type: Boolean,
+    default: true
+  },
+  showValue: {
+    type: Boolean,
+    default: true
+  },
   size: {
     type: String,
     default: 'normal', // 'small', 'normal', 'large'
-    validator: value => ['small', 'normal', 'large'].includes(value)
   }
 })
 
-const emit = defineEmits([
-  'drag-start',
-  'card-select',
-  'card-hover'
-])
+const emit = defineEmits(['click', 'drag-start', 'drag-end'])
 
-// Component state
-const isHovered = ref(false)
-const isDragging = ref(false)
+// Card visual properties based on suit
+const suitColors = {
+  'Spring': '#3f6',   // Green  
+  'Summer': '#fd4',   // Yellow
+  'Autumn': '#f93',   // Orange
+  'Winter': '#3af',   // Blue
+  'Stars': '#fff'     // White
+}
 
-// Computed properties
-const cardDimensions = computed(() => {
-  const sizes = {
-    small: { width: 12, height: 16 },
-    normal: { width: 15, height: 20 },
-    large: { width: 18, height: 24 }
-  }
-  return sizes[props.size]
-})
-
-const cardRadius = computed(() => {
-  return cardDimensions.value.width * 0.1
-})
-
-const cardTransform = computed(() => {
-  const pos = props.position
-  return `translate(${pos.x}, ${pos.y}) rotate(${pos.rotation || 0})`
-})
-
-const cardClasses = computed(() => {
-  return [
-    'game-card',
-    `card-${props.card.suit.toLowerCase()}`,
-    {
-      'card-draggable': props.draggable,
-      'card-face': isFaceCard.value,
-      'card-hovered': isHovered.value,
-      'card-selected': props.selected,
-      'card-dragging': isDragging.value
-    }
-  ]
-})
-
-const isFaceCard = computed(() => {
-  return ['F', 'N', 'Q', 'K'].includes(props.card.rank)
-})
-
-const isSelected = computed(() => props.selected)
-
-const isGlowing = computed(() => {
-  return isHovered.value || props.selected || isDragging.value
-})
-
-const displayRank = computed(() => {
-  const rankMap = {
-    'F': 'F',  // Fool
-    'N': 'N',  // Knight  
-    'Q': 'Q',  // Queen
-    'K': 'K',  // King
-    'T': '10'  // Ten
-  }
-  return rankMap[props.card.rank] || props.card.rank
+const cardPoints = computed(() => {
+  if (!props.position.corners) return '0,0 10,0 10,15 0,15'
+  return props.position.corners
+    .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(' ')
 })
 
 const cardFill = computed(() => {
-  if (isFaceCard.value) {
-    return 'url(#faceCardGradient)'
-  }
-  return getSeasonalCardColor()
+  if (props.selected) return '#fff'
+  return suitColors[props.card.suit] || '#fff'
 })
 
 const cardStroke = computed(() => {
-  if (isHovered.value || props.selected) {
-    return getSuitColor()
-  }
-  return '#4a4a4a'
+  if (props.selected) return '#ff0'
+  if (props.draggable) return '#888'
+  return '#000'
 })
 
 const strokeWidth = computed(() => {
-  return isHovered.value || props.selected ? 1.5 : 1
+  if (props.selected) return '3'
+  if (props.draggable) return '2'
+  return '1'
 })
 
-const mysticalBorderColor = computed(() => {
-  return getSuitColor()
+const textColor = computed(() => {
+  // Use contrasting color on light backgrounds
+  const lightSuits = ['Summer', 'Stars']
+  return lightSuits.includes(props.card.suit) ? '#000' : '#fff'
 })
 
-const rankColor = computed(() => {
-  return getSuitColor()
+const valueColor = computed(() => {
+  return props.selected ? '#000' : '#fff'
 })
 
-const rankFontSize = computed(() => {
-  return cardDimensions.value.width * 0.4
+const fontSize = computed(() => {
+  const sizes = { small: '8', normal: '10', large: '14' }
+  return sizes[props.size] || sizes.normal
 })
 
-const rankPosition = computed(() => {
-  return {
-    x: cardDimensions.value.width * 0.2,
-    y: cardDimensions.value.height * 0.25
-  }
+const valueFontSize = computed(() => {
+  const sizes = { small: '6', normal: '8', large: '10' }
+  return sizes[props.size] || sizes.normal
 })
 
-const suitPosition = computed(() => {
-  return {
-    x: cardDimensions.value.width * 0.75,
-    y: cardDimensions.value.height * 0.7
-  }
+// Calculate text position (center of card)
+const textPosition = computed(() => {
+  if (!props.position.corners) return { x: 5, y: 7.5 }
+  
+  const corners = props.position.corners
+  const centerX = corners.reduce((sum, [x]) => sum + x, 0) / 4
+  const centerY = corners.reduce((sum, [, y]) => sum + y, 0) / 4
+  
+  return { x: centerX, y: centerY }
 })
 
-const suitSize = computed(() => {
-  return cardDimensions.value.width * 0.3
+// Calculate value position (top-left corner)
+const valuePosition = computed(() => {
+  if (!props.position.corners) return { x: 2, y: 3 }
+  
+  const corners = props.position.corners
+  const minX = Math.min(...corners.map(([x]) => x))
+  const minY = Math.min(...corners.map(([, y]) => y))
+  
+  return { x: minX + 3, y: minY + 5 }
 })
 
-// Methods
-const getSuitColor = () => {
-  const colors = {
-    spring: '#55cc00',    // Phosphor lime
-    summer: '#ffaa00',    // Solar orange
-    autumn: '#cc5500',    // Autumn rust
-    winter: '#00ccaa',    // Phosphor cyan
-    stars: '#aa00cc'      // Phosphor magenta
-  }
-  return colors[props.card.suit.toLowerCase()] || '#00ccaa'
-}
-
-const getSeasonalCardColor = () => {
-  const baseColors = {
-    spring: 'rgba(85, 204, 0, 0.1)',
-    summer: 'rgba(255, 170, 0, 0.1)', 
-    autumn: 'rgba(204, 85, 0, 0.1)',
-    winter: 'rgba(0, 204, 170, 0.1)',
-    stars: 'rgba(170, 0, 204, 0.1)'
+// Card display text (rank + suit symbol)
+const cardDisplay = computed(() => {
+  const rank = props.card.getRankDisplay()
+  const suit = props.card.getSuitSymbol()
+  
+  // For face cards, show both rank and suit
+  if (props.card.isFaceCard()) {
+    return `${rank.charAt(0)}${suit}`
   }
   
-  const base = baseColors[props.card.suit.toLowerCase()] || 'rgba(0, 204, 170, 0.1)'
-  
-  if (isHovered.value || props.selected) {
-    return base.replace('0.1', '0.3')
-  }
-  
-  return base
-}
+  // For number cards, show value and suit
+  return `${props.card.getGameValue()}${suit}`
+})
 
 // Event handlers
+const handleClick = (event) => {
+  event.stopPropagation()
+  emit('click', { 
+    card: props.card, 
+    cardId: props.card.id,
+    suit: props.card.suit,
+    rank: props.card.rank,
+    gameValue: props.card.getGameValue(),
+    event 
+  })
+}
+
 const handleMouseDown = (event) => {
-  if (!props.draggable) return
-  
-  event.preventDefault()
-  isDragging.value = true
-  
-  emit('drag-start', {
-    card: props.card,
-    position: props.position,
-    mouseEvent: event
-  })
-}
-
-const handleMouseOver = () => {
-  isHovered.value = true
-  emit('card-hover', {
-    card: props.card,
-    hovered: true
-  })
-}
-
-const handleMouseOut = () => {
-  isHovered.value = false
-  emit('card-hover', {
-    card: props.card,
-    hovered: false
-  })
+  if (props.draggable) {
+    event.stopPropagation()
+    emit('drag-start', { 
+      card: props.card, 
+      cardId: props.card.id,
+      position: props.position,
+      event 
+    })
+  }
 }
 </script>
 
@@ -290,52 +199,37 @@ const handleMouseOut = () => {
   transition: all 0.2s ease;
 }
 
-.card-draggable {
+.game-card.is-draggable {
   cursor: grab;
 }
 
-.card-dragging {
+.game-card.is-draggable:active {
   cursor: grabbing;
-  filter: brightness(1.3);
 }
 
-.card-hovered {
+.game-card.is-selected {
   filter: brightness(1.2);
 }
 
-.card-body {
+.card-background {
   transition: all 0.2s ease;
 }
 
-.card-rank {
+.game-card:hover .card-background {
+  filter: brightness(1.1);
+}
+
+.card-text {
+  font-family: monospace;
+  font-weight: bold;
   pointer-events: none;
-  filter: drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.5));
+  text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.8);
 }
 
-.face-card-border {
-  animation: mysticalPulse 2s ease-in-out infinite;
-}
-
-.card-glow {
-  animation: glowPulse 1.5s ease-in-out infinite alternate;
-}
-
-.selection-ring {
-  animation: selectionPulse 1s ease-in-out infinite alternate;
-}
-
-@keyframes mysticalPulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
-
-@keyframes glowPulse {
-  0% { opacity: 0.2; }
-  100% { opacity: 0.6; }
-}
-
-@keyframes selectionPulse {
-  0% { opacity: 0.6; }
-  100% { opacity: 1; }
+.card-value {
+  font-family: monospace;
+  font-weight: bold;
+  pointer-events: none;
+  text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.8);
 }
 </style>
