@@ -1,0 +1,106 @@
+# ========================================
+# CUSTOM RULES
+# ========================================
+
+# Ignore all Markdown files...
+*.md
+
+# ...except README.md and ILLIMAT.md
+!README.md
+!ILLIMAT.md
+
+# Ignore entire directories
+.team/
+.claude/
+.github/
+
+# Ignore Rust build and other backend-specific paths
+/target/
+backend/target/
+backend/exports/
+backend/saves/
+
+# ========================================
+# OS-SPECIFIC IGNORE (macOS)
+# ========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+*.swp
+*.lock
+*.bak
+*.tmp
+*.orig
+._*
+
+# ========================================
+# RUST
+# ========================================
+**/*.rs.bk
+/cargo.lock
+/.cargo/config.toml
+/.cargo/config
+/rust-toolchain
+/rust-toolchain.toml
+clippy.json
+/coverage/
+*.profraw
+*.profdata
+
+# ========================================
+# NODE / VUE / FRONTEND
+# ========================================
+node_modules/
+yarn.lock
+npm-debug.log*
+package-lock.json
+.vite/
+/dist/
+/build/
+/.nuxt/
+/output/
+/output_dist/
+*.nuxt.*
+.quasar/
+/public/*
+.eslintcache
+/*.d.ts
+/storybook-static/
+
+# ========================================
+# ENV FILES
+# ========================================
+.env
+.env.*
+!.env.example
+
+# ========================================
+# TEST OUTPUT
+# ========================================
+/coverage/
+/test-results/
+/cypress/screenshots/
+/cypress/videos/
+
+# ========================================
+# IDEs & TOOLS
+# ========================================
+.vscode/
+.idea/
+*.iml
+*.sublime-workspace
+*.sublime-project
+*~ 
+*.sw?
+*.tmp
+
+# ========================================
+# MISC
+# ========================================
+*.pid
+*.log
+*.lock
+build/
+tmp/
+temp/

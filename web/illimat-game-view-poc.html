@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Illimat Game State</title>
+  <style>
+    body {
+      margin: 0;
+      background: #222;
+      color: #eee;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1em;
+    }
+    svg {
+      border: 1px solid #444;
+      overflow: visible;
+    }
+    .controls {
+      margin-top: 0.5em;
+      display: flex;
+      gap: 0.5em;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    input[type=range] {
+      width: 100px;
+    }
+    button {
+      background: #444;
+      color: #eee;
+      border: 1px solid #666;
+      padding: 0.4em 1em;
+      cursor: pointer;
+    }
+    .okus-btn {
+      padding: 0.3em 0.6em;
+      min-width: 2em;
+    }
+    .okus-btn.active {
+      background: #666;
+      border-color: #888;
+    }
+    .okus-btn.disabled {
+      background: #333;
+      color: #666;
+      border-color: #444;
+      cursor: not-allowed;
+    }
+    label {
+      font-size: 0.9em;
+    }
+    span {
+      font-size: 0.9em;
+      min-width: 1.5em;
+      text-align: center;
+    }
+    .debug {
+      margin-top: 1em;
+      font-size: 0.8em;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+<svg id="scene" width="300" height="300" viewBox="0 0 300 300">
+  <g id="referenceLines"></g>
+  <g id="cards"></g>
+  <polygon id="top"   fill="#fff" stroke="#000" stroke-width="0.5"/>
+  <polygon id="left"  stroke="#000" stroke-width="0.5"/>
+  <polygon id="right" stroke="#000" stroke-width="0.5"/>
+  <g id="okuses"></g>
+</svg>
+
+<div class="controls">
+  <label for="cameraSlider">Camera:</label>
+  <input type="range" id="cameraSlider" min="0" max="359" value="90" />
+  <span id="cameraValue">90°</span>
+</div>
+
+<div class="controls">
+  <label for="illimatSlider">Illimat:</label>
+  <input type="range" id="illimatSlider" min="0" max="359" value="0" />
+  <span id="illimatValue">0°</span>
+  <button id="nextSeason">Next Season</button>
+</div>
+
+<div class="controls">
+  <label for="okusCount">Okus Count:</label>
+  <input type="range" id="okusCount" min="2" max="4" value="4" />
+  <span id="okusCountValue">4</span>
+  <span>Okuses:</span>
+  <button id="okusA" class="okus-btn active">A</button>
+  <button id="okusB" class="okus-btn active">B</button>
+  <button id="okusC" class="okus-btn active">C</button>
+  <button id="okusD" class="okus-btn active">D</button>
+</div>
+
+<div class="controls">
+  <label for="cardCount0">Field 0:</label>
+  <input type="range" id="cardCount0" min="0" max="9" value="1" />
+  <span id="cardCountValue0">1</span>
+  
+  <label for="cardCount1">Field 1:</label>
+  <input type="range" id="cardCount1" min="0" max="9" value="0" />
+  <span id="cardCountValue1">0</span>
+</div>
+
+<div class="controls">
+  <label for="cardCount2">Field 2:</label>
+  <input type="range" id="cardCount2" min="0" max="9" value="0" />
+  <span id="cardCountValue2">0</span>
+  
+  <label for="cardCount3">Field 3:</label>
+  <input type="range" id="cardCount3" min="0" max="9" value="0" />
+  <span id="cardCountValue3">0</span>
+</div>
+
+<div class="debug" id="debugInfo"></div>
+
+<script>
+const W = 100, D = 100, H = 17;
+const offset = [150, 150];
+let cameraAngle = 90;
+let illimatAngle = 0;
+let animating = false;
+
+let maxOkuses = 4;
+let okusState = [true, true, true, true];
+let cardCounts = [1, 0, 0, 0];
+
+let illimatCenter = { x: 0, y: 0 };
+let fieldCenters = {
+  left: { x: -1.25, y: 0 },
+  right: { x: 1.25, y: 0 },
+  front: { x: 0, y: -1.25 },
+  back: { x: 0, y: 1.25 }
+};
+
+const ISO_X_FACTOR = Math.sqrt(3) / 2;
+const ISO_Y_FACTOR = 0.5;
+const Z_SCALE = 1.3;
+
+const topElement = document.getElementById("top");
+const leftElement = document.getElementById("left");
+const rightElement = document.getElementById("right");
+const cardsGroup = document.getElementById("cards");
+const okusesGroup = document.getElementById("okuses");
+const referenceLinesGroup = document.getElementById("referenceLines");
+const cameraSlider = document.getElementById("cameraSlider");
+const cameraValue = document.getElementById("cameraValue");
+const illimatSlider = document.getElementById("illimatSlider");
+const illimatValue = document.getElementById("illimatValue");
+const debugInfo = document.getElementById("debugInfo");
+
+const cubeVertices = [
+  [-W/2, -D/2,  H], [ W/2, -D/2,  H],
+  [ W/2,  D/2,  H], [-W/2,  D/2,  H],
+  [-W/2, -D/2, -H], [ W/2, -D/2, -H],
+  [ W/2,  D/2, -H], [-W/2,  D/2, -H],
+];
+
+const projectedPoints = new Array(8);
+for (let i = 0; i < 8; i++) {
+  projectedPoints[i] = [0, 0];
+}
+
+const okusPositions = new Array(4);
+for (let i = 0; i < 4; i++) {
+  okusPositions[i] = [0, 0];
+}
+
+const okusOffsets = [
+  [1.5, -1], [-2, 0.5], [1, 1.5], [-0.5, -2]
+];
+
+const greekMappings = [
+  { alpha: 3, beta: 2, gamma: 1, delta: 0, epsilon: 7, zeta: 6, eta: 5 },
+  { alpha: 2, beta: 1, gamma: 0, delta: 3, epsilon: 6, zeta: 5, eta: 4 },
+  { alpha: 1, beta: 0, gamma: 3, delta: 2, epsilon: 5, zeta: 4, eta: 7 },
+  { alpha: 0, beta: 3, gamma: 2, delta: 1, epsilon: 4, zeta: 7, eta: 6 },
+];
+
+const seasonalColors = [
+  ['#3af', '#3f6'], ['#3f6', '#fd4'], ['#fd4', '#f93'], ['#f93', '#3af'],
+];
+
+function getSeasonalMapping(cameraAngle, illimatAngle) {
+  const totalAngle = cameraAngle + illimatAngle;
+  const q = Math.floor(((totalAngle + 45) % 360) / 90);
+  const g = greekMappings[q];
+  const colors = seasonalColors[q];
+  
+  return { g, colors };
+}
+
+function updateProjections(cameraAngle, illimatAngle, lift = 0) {
+  const cameraRad = cameraAngle * Math.PI / 180;
+  const illimatRad = illimatAngle * Math.PI / 180;
+  
+  const illimatX = illimatCenter.x * W;
+  const illimatY = illimatCenter.y * W;
+  
+  for (let i = 0; i < 8; i++) {
+    const [x, y, z] = cubeVertices[i];
+    
+    const illimatRotX = x * Math.cos(illimatRad) - y * Math.sin(illimatRad) + illimatX;
+    const illimatRotY = x * Math.sin(illimatRad) + y * Math.cos(illimatRad) + illimatY;
+    
+    const finalX = illimatRotX * Math.cos(cameraRad) - illimatRotY * Math.sin(cameraRad);
+    const finalY = illimatRotX * Math.sin(cameraRad) + illimatRotY * Math.cos(cameraRad);
+    
+    projectedPoints[i][0] = (finalX - finalY) * ISO_X_FACTOR + offset[0];
+    projectedPoints[i][1] = (finalX + finalY) * ISO_Y_FACTOR - (z * Z_SCALE) + lift + offset[1];
+  }
+
+  const circleRadius = W / 4;
+  for (let i = 0; i < 4; i++) {
+    const theta = (i / Math.max(maxOkuses, 1)) * 2 * Math.PI;
+    const baseX = circleRadius * Math.cos(theta);
+    const baseY = circleRadius * Math.sin(theta);
+    const [offsetX, offsetY] = okusOffsets[i];
+    const x = baseX + offsetX;
+    const y = baseY + offsetY;
+    const z = H + 3;
+    
+    const illimatRotX = x * Math.cos(illimatRad) - y * Math.sin(illimatRad) + illimatX;
+    const illimatRotY = x * Math.sin(illimatRad) + y * Math.cos(illimatRad) + illimatY;
+    
+    const finalX = illimatRotX * Math.cos(cameraRad) - illimatRotY * Math.sin(cameraRad);
+    const finalY = illimatRotX * Math.sin(cameraRad) + illimatRotY * Math.cos(cameraRad);
+    
+    okusPositions[i][0] = (finalX - finalY) * ISO_X_FACTOR + offset[0];
+    okusPositions[i][1] = (finalX + finalY) * ISO_Y_FACTOR - (z * Z_SCALE) + lift + offset[1];
+  }
+}
+
+function pointsToString(indices) {
+  let result = '';
+  for (let i = 0; i < indices.length; i++) {
+    const [x, y] = projectedPoints[indices[i]];
+    if (i > 0) result += ' ';
+    result += Math.round(x * 10) / 10 + ',' + Math.round(y * 10) / 10;
+  }
+  return result;
+}
+
+function updateReferenceLines(cameraAngle) {
+  referenceLinesGroup.innerHTML = '';
+  
+  const centerX = illimatCenter.x * W;
+  const centerY = illimatCenter.y * W;
+  const centerZ = -H;
+  const cameraRad = cameraAngle * Math.PI / 180;
+  
+  const lineLength = W * 3;
+  
+  // Original guide lines (0° and 90°)
+  const line1Start = [centerX, centerY - lineLength, centerZ];
+  const line1End = [centerX, centerY + lineLength, centerZ];
+  
+  const line2Start = [centerX - lineLength, centerY, centerZ];
+  const line2End = [centerX + lineLength, centerY, centerZ];
+  
+  // New diagonal guide lines (45° and 135°)
+  const diagonalOffset = lineLength / Math.sqrt(2);
+  
+  const line3Start = [centerX - diagonalOffset, centerY - diagonalOffset, centerZ];
+  const line3End = [centerX + diagonalOffset, centerY + diagonalOffset, centerZ];
+  
+  const line4Start = [centerX - diagonalOffset, centerY + diagonalOffset, centerZ];
+  const line4End = [centerX + diagonalOffset, centerY - diagonalOffset, centerZ];
+  
+  // Apply camera rotation and project all line endpoints
+  const lines = [
+    { start: line1Start, end: line1End, color: "#ff0000" },
+    { start: line2Start, end: line2End, color: "#0000ff" },
+    { start: line3Start, end: line3End, color: "#00ff00" },
+    { start: line4Start, end: line4End, color: "#00ffff" }
+  ];
+  
+  lines.forEach(({ start, end, color }) => {
+    const startProj = (() => {
+      const finalX = start[0] * Math.cos(cameraRad) - start[1] * Math.sin(cameraRad);
+      const finalY = start[0] * Math.sin(cameraRad) + start[1] * Math.cos(cameraRad);
+      return [
+        (finalX - finalY) * ISO_X_FACTOR + offset[0],
+        (finalX + finalY) * ISO_Y_FACTOR - (start[2] * Z_SCALE) + offset[1]
+      ];
+    })();
+    
+    const endProj = (() => {
+      const finalX = end[0] * Math.cos(cameraRad) - end[1] * Math.sin(cameraRad);
+      const finalY = end[0] * Math.sin(cameraRad) + end[1] * Math.cos(cameraRad);
+      return [
+        (finalX - finalY) * ISO_X_FACTOR + offset[0],
+        (finalX + finalY) * ISO_Y_FACTOR - (end[2] * Z_SCALE) + offset[1]
+      ];
+    })();
+    
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", startProj[0].toFixed(1));
+    line.setAttribute("y1", startProj[1].toFixed(1));
+    line.setAttribute("x2", endProj[0].toFixed(1));
+    line.setAttribute("y2", endProj[1].toFixed(1));
+    line.setAttribute("stroke", color);
+    line.setAttribute("stroke-width", "1");
+    line.setAttribute("stroke-dasharray", "3,3");
+    line.setAttribute("opacity", "0.7");
+    
+    referenceLinesGroup.appendChild(line);
+  });
+}
+
+function drawCardsInField(fieldIndex, fieldCenter, cameraRad, fieldZ) {
+  const cardCount = cardCounts[fieldIndex];
+  let fieldCardWidth = W * 0.4;
+  let fieldCardHeight = fieldCardWidth * (30/42);
+  
+  // Rotate cards 90 degrees for fields 1 and 3
+  if (fieldIndex === 1 || fieldIndex === 3) {
+    [fieldCardWidth, fieldCardHeight] = [fieldCardHeight, fieldCardWidth];
+  }
+  
+  for (let i = 0; i < cardCount; i++) {
+    let cardY, cardX;
+    
+    if (fieldIndex === 0) { // Right field - cards are landscape, use fieldCardHeight for Y positioning
+      const fieldCenterY = fieldCenter.y * W;
+      const fieldTopY = fieldCenterY - W/2;
+      const fieldBottomY = fieldCenterY + W/2;
+      if (i === 0) cardY = fieldCenterY, cardX = fieldCenter.x * W - 25;
+      else if (i === 1) cardY = fieldTopY + fieldCardHeight/2, cardX = fieldCenter.x * W - 25;
+      else if (i === 2) cardY = fieldBottomY - fieldCardHeight/2, cardX = fieldCenter.x * W - 25;
+      else if (i === 3) cardY = fieldCenterY, cardX = fieldCenter.x * W + 25;
+      else if (i === 4) cardY = fieldTopY + fieldCardHeight/2, cardX = fieldCenter.x * W + 25;
+      else if (i === 5) cardY = fieldBottomY - fieldCardHeight/2, cardX = fieldCenter.x * W + 25;
+      else if (i === 6) cardY = fieldCenterY, cardX = fieldCenter.x * W + 75;
+      else if (i === 7) cardY = fieldTopY + fieldCardHeight/2, cardX = fieldCenter.x * W + 75;
+      else if (i === 8) cardY = fieldBottomY - fieldCardHeight/2, cardX = fieldCenter.x * W + 75;
+    } else if (fieldIndex === 1) { // Back field
+      if (i === 0) cardX = fieldCenter.x * W, cardY = fieldCenter.y * W - 25;
+      else if (i === 1) cardX = fieldCenter.x * W - W/2 + fieldCardWidth/2, cardY = fieldCenter.y * W - 25;
+      else if (i === 2) cardX = fieldCenter.x * W + W/2 - fieldCardWidth/2, cardY = fieldCenter.y * W - 25;
+      else if (i === 3) cardX = fieldCenter.x * W, cardY = fieldCenter.y * W + 25;
+      else if (i === 4) cardX = fieldCenter.x * W - W/2 + fieldCardWidth/2, cardY = fieldCenter.y * W + 25;
+      else if (i === 5) cardX = fieldCenter.x * W + W/2 - fieldCardWidth/2, cardY = fieldCenter.y * W + 25;
+      else if (i === 6) cardX = fieldCenter.x * W, cardY = fieldCenter.y * W + 75;
+      else if (i === 7) cardX = fieldCenter.x * W - W/2 + fieldCardWidth/2, cardY = fieldCenter.y * W + 75;
+      else if (i === 8) cardX = fieldCenter.x * W + W/2 - fieldCardWidth/2, cardY = fieldCenter.y * W + 75;
+    } else if (fieldIndex === 2) { // Left field - cards are landscape, use fieldCardHeight for Y positioning
+      const fieldCenterY = fieldCenter.y * W;
+      const fieldTopY = fieldCenterY - W/2;
+      const fieldBottomY = fieldCenterY + W/2;
+      if (i === 0) cardY = fieldCenterY, cardX = fieldCenter.x * W + 25;
+      else if (i === 1) cardY = fieldTopY + fieldCardHeight/2, cardX = fieldCenter.x * W + 25;
+      else if (i === 2) cardY = fieldBottomY - fieldCardHeight/2, cardX = fieldCenter.x * W + 25;
+      else if (i === 3) cardY = fieldCenterY, cardX = fieldCenter.x * W - 25;
+      else if (i === 4) cardY = fieldTopY + fieldCardHeight/2, cardX = fieldCenter.x * W - 25;
+      else if (i === 5) cardY = fieldBottomY - fieldCardHeight/2, cardX = fieldCenter.x * W - 25;
+      else if (i === 6) cardY = fieldCenterY, cardX = fieldCenter.x * W - 75;
+      else if (i === 7) cardY = fieldTopY + fieldCardHeight/2, cardX = fieldCenter.x * W - 75;
+      else if (i === 8) cardY = fieldBottomY - fieldCardHeight/2, cardX = fieldCenter.x * W - 75;
+    } else if (fieldIndex === 3) { // Front field
+      if (i === 0) cardX = fieldCenter.x * W, cardY = fieldCenter.y * W + 25;
+      else if (i === 1) cardX = fieldCenter.x * W - W/2 + fieldCardWidth/2, cardY = fieldCenter.y * W + 25;
+      else if (i === 2) cardX = fieldCenter.x * W + W/2 - fieldCardWidth/2, cardY = fieldCenter.y * W + 25;
+      else if (i === 3) cardX = fieldCenter.x * W, cardY = fieldCenter.y * W - 25;
+      else if (i === 4) cardX = fieldCenter.x * W - W/2 + fieldCardWidth/2, cardY = fieldCenter.y * W - 25;
+      else if (i === 5) cardX = fieldCenter.x * W + W/2 - fieldCardWidth/2, cardY = fieldCenter.y * W - 25;
+      else if (i === 6) cardX = fieldCenter.x * W, cardY = fieldCenter.y * W - 75;
+      else if (i === 7) cardX = fieldCenter.x * W - W/2 + fieldCardWidth/2, cardY = fieldCenter.y * W - 75;
+      else if (i === 8) cardX = fieldCenter.x * W + W/2 - fieldCardWidth/2, cardY = fieldCenter.y * W - 75;
+    }
+    
+    const cardCorners = [
+      [cardX - fieldCardWidth/2, cardY - fieldCardHeight/2, fieldZ],
+      [cardX + fieldCardWidth/2, cardY - fieldCardHeight/2, fieldZ],
+      [cardX + fieldCardWidth/2, cardY + fieldCardHeight/2, fieldZ],
+      [cardX - fieldCardWidth/2, cardY + fieldCardHeight/2, fieldZ],
+    ];
+    
+    const projectedCardCorners = cardCorners.map(([x, y, z]) => {
+      const finalX = x * Math.cos(cameraRad) - y * Math.sin(cameraRad);
+      const finalY = x * Math.sin(cameraRad) + y * Math.cos(cameraRad);
+      return [
+        (finalX - finalY) * ISO_X_FACTOR + offset[0],
+        (finalX + finalY) * ISO_Y_FACTOR - (z * Z_SCALE) + offset[1]
+      ];
+    });
+    
+    const cardElement = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    const cardPointsStr = projectedCardCorners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    cardElement.setAttribute("points", cardPointsStr);
+    cardElement.setAttribute("fill", "#fff");
+    cardElement.setAttribute("stroke", "#000");
+    cardElement.setAttribute("stroke-width", "2");
+    cardsGroup.appendChild(cardElement);
+  }
+}
+
+function updateCards(cameraAngle, illimatAngle) {
+  cardsGroup.innerHTML = '';
+  
+  const fieldZ = -H;
+  const isAligned = Math.abs(illimatAngle % 90) < 0.5 || Math.abs(illimatAngle % 90) > 89.5;
+  const illimatQuadrant = Math.floor(((illimatAngle + 45 + 90) % 360) / 90);
+  const cameraRad = cameraAngle * Math.PI / 180;
+  
+  let fieldColors = ['#fff', '#fff', '#fff', '#fff'];
+  
+  if (isAligned) {
+    const allSeasonColors = ['#3af', '#3f6', '#fd4', '#f93'];
+    fieldColors[0] = allSeasonColors[(illimatQuadrant + 0) % 4];
+    fieldColors[1] = allSeasonColors[(illimatQuadrant + 3) % 4];
+    fieldColors[2] = allSeasonColors[(illimatQuadrant + 2) % 4];
+    fieldColors[3] = allSeasonColors[(illimatQuadrant + 1) % 4];
+  }
+  
+  const fields = [
+    { name: 'right', center: fieldCenters.right, color: fieldColors[0], index: 0 },
+    { name: 'back', center: fieldCenters.back, color: fieldColors[1], index: 1 },
+    { name: 'left', center: fieldCenters.left, color: fieldColors[2], index: 2 },
+    { name: 'front', center: fieldCenters.front, color: fieldColors[3], index: 3 }
+  ];
+  
+  fields.forEach((field) => {
+    const centerX = field.center.x * W;
+    const centerY = field.center.y * W;
+    
+    let corners;
+    if (field.index === 0) { // Right field - extend away from center (positive X)
+      corners = [
+        [centerX - W/2, centerY - W/2, fieldZ],
+        [centerX + W, centerY - W/2, fieldZ],
+        [centerX + W, centerY + W/2, fieldZ],
+        [centerX - W/2, centerY + W/2, fieldZ],
+      ];
+    } else if (field.index === 1) { // Back field - extend away from center (positive Y)  
+      corners = [
+        [centerX - W/2, centerY - W/2, fieldZ],
+        [centerX + W/2, centerY - W/2, fieldZ],
+        [centerX + W/2, centerY + W, fieldZ],
+        [centerX - W/2, centerY + W, fieldZ],
+      ];
+    } else if (field.index === 2) { // Left field - extend away from center (negative X)
+      corners = [
+        [centerX - W, centerY - W/2, fieldZ],
+        [centerX + W/2, centerY - W/2, fieldZ],
+        [centerX + W/2, centerY + W/2, fieldZ],
+        [centerX - W, centerY + W/2, fieldZ],
+      ];
+    } else { // Front field - extend away from center (negative Y)
+      corners = [
+        [centerX - W/2, centerY - W, fieldZ],
+        [centerX + W/2, centerY - W, fieldZ],
+        [centerX + W/2, centerY + W/2, fieldZ],
+        [centerX - W/2, centerY + W/2, fieldZ],
+      ];
+    }
+    
+    const projectedCorners = corners.map(([x, y, z]) => {
+      const finalX = x * Math.cos(cameraRad) - y * Math.sin(cameraRad);
+      const finalY = x * Math.sin(cameraRad) + y * Math.cos(cameraRad);
+      return [
+        (finalX - finalY) * ISO_X_FACTOR + offset[0],
+        (finalX + finalY) * ISO_Y_FACTOR - (z * Z_SCALE) + offset[1]
+      ];
+    });
+    
+    const fieldElement = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    const pointsStr = projectedCorners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    fieldElement.setAttribute("points", pointsStr);
+    fieldElement.setAttribute("fill", "none");
+    fieldElement.setAttribute("stroke", field.color);
+    fieldElement.setAttribute("stroke-width", "1.5");
+    cardsGroup.appendChild(fieldElement);
+    
+    const fieldCenter = projectedCorners.reduce((acc, corner) => [
+      acc[0] + corner[0] / 4,
+      acc[1] + corner[1] / 4
+    ], [0, 0]);
+    
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", fieldCenter[0].toFixed(1));
+    label.setAttribute("y", fieldCenter[1].toFixed(1));
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("dominant-baseline", "middle");
+    label.setAttribute("fill", "#fff");
+    label.setAttribute("font-size", "12");
+    label.setAttribute("font-weight", "bold");
+    label.setAttribute("stroke", "#000");
+    label.setAttribute("stroke-width", "0.5");
+    label.textContent = field.index.toString();
+    cardsGroup.appendChild(label);
+    
+    drawCardsInField(field.index, field.center, cameraRad, fieldZ);
+  });
+}
+
+function updateOkuses() {
+  okusesGroup.innerHTML = '';
+  for (let i = 0; i < maxOkuses; i++) {
+    if (okusState[i]) {
+      const [x, y] = okusPositions[i];
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", x.toFixed(1));
+      circle.setAttribute("cy", y.toFixed(1));
+      circle.setAttribute("r", "4");
+      circle.setAttribute("fill", "#666");
+      circle.setAttribute("stroke", "#000");
+      circle.setAttribute("stroke-width", "0.5");
+      okusesGroup.appendChild(circle);
+    }
+  }
+}
+
+function updateOkusButtons() {
+  const buttons = ['A', 'B', 'C', 'D'];
+  buttons.forEach((letter, index) => {
+    const button = document.getElementById(`okus${letter}`);
+    const isAvailable = index < maxOkuses;
+    const isOccupied = okusState[index];
+    button.classList.toggle('disabled', !isAvailable);
+    button.classList.toggle('active', isAvailable && isOccupied);
+    button.disabled = !isAvailable;
+  });
+}
+
+function update(cameraAngle, illimatAngle, lift = 0) {
+  cameraSlider.value = cameraAngle;
+  cameraValue.textContent = Math.round(cameraAngle) + '°';
+  illimatSlider.value = illimatAngle;
+  illimatValue.textContent = Math.round(illimatAngle) + '°';
+
+  updateProjections(cameraAngle, illimatAngle, lift);
+  
+  const { g, colors } = getSeasonalMapping(cameraAngle, illimatAngle);
+  
+  const totalAngle = (cameraAngle + illimatAngle) % 360;
+  const quadrant = Math.floor(((totalAngle + 45) % 360) / 90);
+  debugInfo.textContent = `Total angle: ${Math.round(totalAngle)}° | Quadrant: ${quadrant} | Camera: ${Math.round(cameraAngle)}° | Illimat: ${Math.round(illimatAngle)}°`;
+
+  topElement.setAttribute("points", pointsToString([0, 1, 2, 3]));
+  leftElement.setAttribute("points", pointsToString([g.alpha, g.epsilon, g.zeta, g.beta]));
+  leftElement.setAttribute("fill", colors[0]);
+  leftElement.style.display = "block";
+  rightElement.setAttribute("points", pointsToString([g.zeta, g.eta, g.gamma, g.beta]));
+  rightElement.setAttribute("fill", colors[1]);
+  rightElement.style.display = "block";
+
+  updateOkuses();
+  updateCards(cameraAngle, illimatAngle);
+  updateReferenceLines(cameraAngle);
+}
+
+function animateTo(nextIllimatAngle) {
+  if (animating) return;
+  animating = true;
+
+  const start = performance.now();
+  const liftDuration = 160;
+  const rotateDuration = 280;
+  const dropDuration = 120;
+  const settlesDuration = 200;
+  const total = liftDuration + rotateDuration + dropDuration + settlesDuration;
+  const angleStart = illimatAngle;
+  const angleEnd = nextIllimatAngle % 360;
+  const angleDelta = (angleEnd - angleStart + 360) % 360;
+
+  function frame(t) {
+    const elapsed = t - start;
+    let angle = angleStart;
+    let lift = 0;
+
+    if (elapsed < liftDuration) {
+      const p = elapsed / liftDuration;
+      const reluctant = 1 - Math.pow(1 - p, 4);
+      lift = -35 * reluctant;
+    } else if (elapsed < liftDuration + rotateDuration) {
+      const p = (elapsed - liftDuration) / rotateDuration;
+      const heavy = p < 0.3 ? 2 * p * p : 1 - 0.5 * Math.pow(-2 * p + 2, 2);
+      angle = angleStart + angleDelta * heavy;
+      lift = -35;
+    } else if (elapsed < liftDuration + rotateDuration + dropDuration) {
+      const p = (elapsed - liftDuration - rotateDuration) / dropDuration;
+      const gravity = p * p * p * p;
+      lift = -35 + (35 * gravity);
+      angle = angleEnd;
+    } else if (elapsed < total) {
+      const settleTime = elapsed - liftDuration - rotateDuration - dropDuration;
+      const p = settleTime / settlesDuration;
+      if (p < 0.3) {
+        const bounceP = p / 0.3;
+        lift = Math.sin(bounceP * Math.PI) * 4 * (1 - bounceP);
+      } else {
+        lift = 0;
+      }
+      angle = angleEnd;
+    } else {
+      illimatAngle = angleEnd;
+      update(cameraAngle, illimatAngle, 0);
+      animating = false;
+      return;
+    }
+
+    update(cameraAngle, angle, lift);
+    requestAnimationFrame(frame);
+  }
+  
+  requestAnimationFrame(frame);
+}
+
+cameraSlider.addEventListener("input", e => {
+  if (!animating) {
+    cameraAngle = +e.target.value;
+    update(cameraAngle, illimatAngle, 0);
+  }
+});
+
+illimatSlider.addEventListener("input", e => {
+  if (!animating) {
+    illimatAngle = +e.target.value;
+    update(cameraAngle, illimatAngle, 0);
+  }
+});
+
+document.getElementById("nextSeason").addEventListener("click", () => {
+  const next = (Math.round(illimatAngle / 90) * 90 + 90) % 360;
+  animateTo(next);
+});
+
+document.getElementById("okusCount").addEventListener("input", e => {
+  maxOkuses = +e.target.value;
+  document.getElementById("okusCountValue").textContent = maxOkuses;
+  updateOkusButtons();
+  if (!animating) update(cameraAngle, illimatAngle, 0);
+});
+
+['A', 'B', 'C', 'D'].forEach((letter, index) => {
+  document.getElementById(`okus${letter}`).addEventListener("click", (e) => {
+    if (index < maxOkuses) {
+      okusState[index] = !okusState[index];
+      updateOkusButtons();
+      if (!animating) update(cameraAngle, illimatAngle, 0);
+    }
+  });
+});
+
+document.getElementById("cardCount0").addEventListener("input", e => {
+  cardCounts[0] = +e.target.value;
+  document.getElementById("cardCountValue0").textContent = cardCounts[0];
+  if (!animating) update(cameraAngle, illimatAngle, 0);
+});
+
+document.getElementById("cardCount1").addEventListener("input", e => {
+  cardCounts[1] = +e.target.value;
+  document.getElementById("cardCountValue1").textContent = cardCounts[1];
+  if (!animating) update(cameraAngle, illimatAngle, 0);
+});
+
+document.getElementById("cardCount2").addEventListener("input", e => {
+  cardCounts[2] = +e.target.value;
+  document.getElementById("cardCountValue2").textContent = cardCounts[2];
+  if (!animating) update(cameraAngle, illimatAngle, 0);
+});
+
+document.getElementById("cardCount3").addEventListener("input", e => {
+  cardCounts[3] = +e.target.value;
+  document.getElementById("cardCountValue3").textContent = cardCounts[3];
+  if (!animating) update(cameraAngle, illimatAngle, 0);
+});
+
+update(cameraAngle, illimatAngle, 0);
+updateOkusButtons();
+</script>
+
+</body>
+</html>

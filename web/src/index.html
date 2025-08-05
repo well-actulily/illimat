@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Illimat - Mystical Card Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #050505;
+            color: #00ccaa;
+            font-family: 'JetBrains Mono', monospace;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .splash {
+            text-align: center;
+            animation: phosphorGlow 3s ease-in-out infinite alternate;
+        }
+        @keyframes phosphorGlow {
+            0% { text-shadow: 0 0 10px #00ccaa; }
+            100% { text-shadow: 0 0 20px #00ccaa, 0 0 30px #aa00cc; }
+        }
+        .subtitle {
+            color: #aa00cc;
+            margin-top: 1rem;
+            opacity: 0.8;
+        }
+        .status {
+            margin-top: 2rem;
+            color: #55cc00;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="splash">
+            <h1>ILLIMAT</h1>
+            <p class="subtitle">Mystical Card Game - Web Version</p>
+            <p class="status">Initializing WebAssembly engine...</p>
+        </div>
+    </div>
+    <script type="module" src="./main.js"></script>
+</body>
+</html>

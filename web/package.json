@@ -1,0 +1,40 @@
+{
+  "name": "illimat-web",
+  "version": "0.1.0",
+  "description": "Web frontend for Illimat card game with WebAssembly integration",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint src --ext .js,.ts,.vue",
+    "format": "prettier --write src"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "pinia": "^2.1.0",
+    "@vueuse/core": "^10.9.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "@vue/tsconfig": "^0.5.1",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0",
+    "eslint": "^8.0.0",
+    "@vue/eslint-config-typescript": "^12.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0",
+    "vue-tsc": "^1.8.0"
+  },
+  "keywords": [
+    "illimat",
+    "card-game",
+    "webassembly",
+    "rust",
+    "vue"
+  ],
+  "author": "Illimat Development Team",
+  "license": "MIT"
+}
