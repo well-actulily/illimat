@@ -5,3 +5,7 @@ pub mod game;
 pub mod wasm_interface;
 
 pub use game::*;
+
+// Re-export WASM interface when targeting WASM
+#[cfg(target_arch = "wasm32")]
+pub use wasm_interface::*;

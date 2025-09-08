@@ -21,6 +21,11 @@ backend/exports/
 backend/saves/
 backend/benchmark_results.txt
 backend/flamegraph_test_input.txt
+backend/pkg/
+web/pkg/
+**/pkg/
+*.wasm
+wasm-pack.log
 
 # ========================================
 # OS-SPECIFIC IGNORE (macOS)
@@ -69,6 +74,12 @@ package-lock.json
 .eslintcache
 /*.d.ts
 /storybook-static/
+web/dist/
+web/build/
+web/.vite/
+**/dist/
+**/build/
+**/.vite/
 
 # ========================================
 # ENV FILES
@@ -84,6 +95,15 @@ package-lock.json
 /test-results/
 /cypress/screenshots/
 /cypress/videos/
+web/cypress/screenshots/
+web/cypress/videos/
+backend/cypress/screenshots/
+backend/cypress/videos/
+**/cypress/screenshots/
+**/cypress/videos/
+cypress-results.json
+junit.xml
+test-output.xml
 
 # ========================================
 # IDEs & TOOLS
@@ -106,3 +126,12 @@ package-lock.json
 build/
 tmp/
 temp/
+perf.data*
+flamegraph.svg
+*.svg
+!README.md
+*.profdata
+*.gcda
+*.gcno
+.benchmarks/
+benchmark-results/

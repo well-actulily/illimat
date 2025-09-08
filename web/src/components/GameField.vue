@@ -1,255 +1,47 @@
+<script setup>
+const props = defineProps({
+  position: {
+    type: String,
+    default: 'SW',
+    validator: (value) => ['SW', 'NW', 'NE', 'SE'].includes(value)
+  }
+})
+
+// Map positions to rotation angles
+const rotationMap = {
+  'SW': 0,
+  'NW': 90,
+  'NE': 180,
+  'SE': 270
+}
+
+const rotation = rotationMap[props.position]
+</script>
+
 <template>
-  <g class="game-field" :class="fieldClasses" @click="handleFieldClick"
-     :data-cy="`game-field`"
-     :data-field-index="fieldIndex"
-     :data-season="season.toLowerCase()"
-     :data-has-okus="hasOkus">
-    <!-- Field boundary -->
-    <rect
-      :x="safeBounds.x"
-      :y="safeBounds.y"
-      :width="safeBounds.width"
-      :height="safeBounds.height"
-      :fill="fieldFill"
-      :stroke="fieldStroke"
-      :stroke-width="strokeWidth"
-      class="field-boundary"
-      :class="{ 
-        clickable: isClickable, 
-        valid: isValidTarget,
-        invalid: isInvalidTarget 
-      }"
-      :rx="4"
+  <g 
+    id="field" 
+    :transform="`rotate(${rotation} 260 260)`"
+  >
+    <polygon 
+      id="field-border" 
+      points="260 351.924 168.077 260 32.5 260 32.5 487.5 260 487.5 260 351.924" 
+      class="wht-stroke hvy-stroke" 
     />
-    
-    <!-- Field label -->
-    <text
-      :x="safeBounds.x + safeBounds.width / 2"
-      :y="safeBounds.y + 12"
-      text-anchor="middle"
-      :fill="labelColor"
-      font-size="10"
-      font-family="monospace"
-      font-weight="bold"
-      class="field-label"
-    >
-      {{ fieldLabel }}
-    </text>
-    
-    <!-- Season indicator -->
-    <circle
-      :cx="safeBounds.x + safeBounds.width - 8"
-      :cy="safeBounds.y + 8"
-      r="4"
-      :fill="seasonColor"
-      :stroke="seasonStroke"
-      stroke-width="1"
-      class="season-indicator"
+    <polyline 
+      id="hatching" 
+      points="107.602 487.5 140.133 420.098 141.845 421.368 110.142 487.5 112.683 487.5 143.57 422.62 145.31 423.847 115.223 487.5 117.763 487.5 147.058 425.066 148.822 426.261 120.304 487.5 122.844 487.5 150.597 427.438 152.386 428.595 125.384 487.5 127.925 487.5 154.186 429.734 156 430.854 130.465 487.5 133.005 487.5 157.825 431.954 159.663 433.036 135.546 487.5 138.086 487.5 161.513 434.098 163.376 435.141 140.626 487.5 143.167 487.5 165.25 436.164 167.137 437.169 145.707 487.5 148.247 487.5 169.014 438.204 171.11 439.199 150.788 487.5 153.328 487.5 172.844 440.121 174.802 440.987 155.868 487.5 158.409 487.5 176.747 441.892 178.704 442.777 160.949 487.5 163.489 487.5 180.672 443.641 182.591 444.46 166.03 487.5 168.57 487.5 184.641 445.307 186.642 446.11 171.11 487.5 173.65 487.5 188.622 446.976 190.671 447.661 176.191 487.5 178.731 487.5 192.707 448.389 194.75 449.107 181.271 487.5 183.812 487.5 196.801 449.802 199.054 450.537 186.352 487.5 188.892 487.5 201.15 451.195 203.007 451.774 191.433 487.5 193.973 487.5 205.1 452.365 207.136 453.145 196.513 487.5 199.054 487.5 209.3 453.512 211.41 454.051 201.594 487.5 204.134 487.5 213.528 454.567 215.612 455.202 206.675 487.5 209.215 487.5 217.78 455.531 219.915 455.977 211.755 487.5 214.296 487.5 222.053 456.401 224.195 456.8 216.836 487.5 219.376 487.5 226.339 457.176 228.486 457.528 221.917 487.5 224.457 487.5 230.633 457.856 232.78 458.16 226.997 487.5 229.538 487.5 235.114 458.464 237.379 458.732 232.078 487.5 234.618 487.5 239.482 458.958 241.593 459.162 237.159 487.5 239.699 487.5 243.757 459.348 245.829 459.504 242.239 487.5 244.78 487.5 247.949 459.642 250.08 459.757 247.32 487.5 249.86 487.5 252.068 459.845 254.057 459.913 252.4 487.5 254.941 487.5 256.307 460" 
+      class="wht-stroke fine-stroke" 
     />
-    
-    <!-- Okus indicator (if present) -->
-    <circle
-      v-if="hasOkus"
-      :cx="safeBounds.x + 8"
-      :cy="safeBounds.y + 8"
-      r="3"
-      fill="#666"
-      stroke="#000"
-      stroke-width="0.5"
-      class="okus-indicator"
+    <path 
+      id="luminary-space" 
+      d="M102.5,383.272l-70,34.228v70h70l34.228-70c-6.371-4.993-12.433-10.363-18.149-16.079-5.716-5.716-11.085-11.778-16.079-18.149Z" 
+      class="wht-stroke hvy-stroke" 
+    />
+    <path 
+      id="card-field" 
+      d="M260,460c-55.228,0-105.228-22.386-141.421-58.579-36.193-36.193-58.579-86.193-58.579-141.421h108.076s91.924,91.923,91.924,91.923v108.076Z" 
+      class="wht-stroke hvy-stroke" 
     />
   </g>
 </template>
-
-<script setup>
-import { computed } from 'vue'
-
-const props = defineProps({
-  field: {
-    type: Object,
-    required: true
-  },
-  fieldIndex: {
-    type: Number,
-    required: true
-  },
-  season: {
-    type: String,
-    required: true
-  },
-  bounds: {
-    type: Object,
-    default: () => ({ x: 0, y: 0, width: 50, height: 50 })
-  },
-  pilePositions: {
-    type: Array,
-    default: () => []
-  },
-  hasOkus: {
-    type: Boolean,
-    default: false
-  },
-  isClickable: {
-    type: Boolean,
-    default: false
-  },
-  isValidTarget: {
-    type: Boolean,
-    default: false
-  },
-  isInvalidTarget: {
-    type: Boolean,
-    default: false
-  }
-})
-
-const emit = defineEmits(['field-click'])
-
-// Computed properties
-const safeBounds = computed(() => {
-  return props.bounds || { x: 0, y: 0, width: 50, height: 50 }
-})
-
-const fieldClasses = computed(() => [
-  'game-field',
-  `field-${props.fieldIndex}`,
-  `season-${props.season.toLowerCase()}`,
-  {
-    'has-okus': props.hasOkus,
-    'has-cards': props.field.looseCards?.length > 0 || props.field.stockpiles?.length > 0
-  }
-])
-
-const fieldLabel = computed(() => {
-  const seasonName = props.season
-  const restrictions = getSeasonRestrictions()
-  return restrictions ? `${seasonName} (${restrictions})` : seasonName
-})
-
-const fieldFill = computed(() => {
-  const alpha = props.hasOkus ? 0.15 : 0.08
-  return `${seasonColor.value}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`
-})
-
-const fieldStroke = computed(() => {
-  return props.hasOkus ? seasonColor.value : '#4a4a4a'
-})
-
-const strokeWidth = computed(() => {
-  return props.hasOkus ? 1.5 : 1
-})
-
-const labelColor = computed(() => {
-  return seasonColor.value
-})
-
-const seasonColor = computed(() => {
-  const colors = {
-    winter: '#00ccaa',    // Phosphor cyan
-    spring: '#55cc00',    // Phosphor lime
-    summer: '#ffaa00',    // Solar orange
-    autumn: '#cc5500'     // Autumn rust
-  }
-  return colors[props.season.toLowerCase()] || '#00ccaa'
-})
-
-const seasonStroke = computed(() => {
-  return '#000'
-})
-
-// Methods
-const getSeasonRestrictions = () => {
-  const restrictions = {
-    winter: 'no harvesting',
-    spring: 'no stockpiling',
-    summer: null,
-    autumn: null
-  }
-  return restrictions[props.season.toLowerCase()]
-}
-
-const handleFieldClick = (event) => {
-  if (!props.isClickable) return
-  
-  event.stopPropagation()
-  emit('field-click', {
-    fieldIndex: props.fieldIndex,
-    fieldId: props.fieldIndex,
-    season: props.season,
-    bounds: safeBounds.value,
-    hasOkus: props.hasOkus,
-    cardCount: (props.field.looseCards?.length || 0) + (props.field.stockpiles?.length || 0),
-    position: {
-      x: event.offsetX,
-      y: event.offsetY
-    }
-  })
-}
-</script>
-
-<style scoped>
-.game-field {
-  transition: all 0.2s ease;
-}
-
-.field-boundary {
-  transition: all 0.2s ease;
-}
-
-.field-boundary.clickable {
-  cursor: pointer;
-}
-
-.field-boundary.clickable:hover {
-  filter: brightness(1.2);
-  stroke-width: 2;
-}
-
-.field-boundary.valid {
-  stroke: #55cc00;
-  stroke-width: 2;
-  filter: drop-shadow(0 0 4px rgba(85, 204, 0, 0.4));
-}
-
-.field-boundary.invalid {
-  stroke: #cc4400;
-  stroke-width: 2;
-  stroke-dasharray: 4,2;
-  filter: drop-shadow(0 0 4px rgba(204, 68, 0, 0.4));
-}
-
-.game-field:hover .field-boundary {
-  filter: brightness(1.2);
-}
-
-.game-field.has-cards .field-boundary {
-  opacity: 0.9;
-}
-
-.game-field.has-okus .field-boundary {
-  filter: brightness(1.3);
-}
-
-.field-label {
-  pointer-events: none;
-  filter: drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.8));
-}
-
-.season-indicator {
-  transition: all 0.2s ease;
-}
-
-.game-field:hover .season-indicator {
-  filter: brightness(1.3);
-  transform: scale(1.1);
-}
-
-.okus-indicator {
-  animation: okusGlow 2s ease-in-out infinite alternate;
-}
-
-@keyframes okusGlow {
-  0% { opacity: 0.7; }
-  100% { opacity: 1; }
-}
-</style>

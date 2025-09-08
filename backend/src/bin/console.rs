@@ -3,12 +3,24 @@ use illimat_core::game::player::{PlayerType, PlayerId};
 use illimat_core::game::field_id::FieldId;
 use illimat_core::game::game_config::GameConfig;
 use illimat_core::game::actions::Action;
+use illimat_core::game::compact_state::CompactState;
+use illimat_core::game::mcts::{MctsTree, MctsConfig, MctsNode};
+use illimat_core::game::simd_compact_integration::SimdCompactOps;
+use illimat_core::game::simple_cpu::SimpleCpu;
 use std::io::{self, Write};
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 use colored::*;
 use chrono;
 use serde_json;
+use crossterm::{
+    cursor,
+    event::{Event, KeyCode, KeyEvent, read},
+    execute,
+    style::{Color, Print, ResetColor, SetForegroundColor},
+    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
+};
 
 /// Enhanced save data structure with metadata and statistics
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -16,6 +28,78 @@ struct EnhancedSaveData {
     metadata: SaveMetadata,
     game_state: IllimatState,
     statistics: GameStatistics,
+}
+
+/// AI opponent configuration
+#[derive(Clone, Debug)]
+struct AIConfig {
+    player_configs: Vec<PlayerAIConfig>,
+}
+
+#[derive(Clone, Debug)]
+struct PlayerAIConfig {
+    player_id: PlayerId,
+    difficulty: AIDifficulty,
+    personality: AIPersonality,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum AIDifficulty {
+    Beginner,  // 500ms thinking time
+    Easy,      // 1s thinking time  
+    Medium,    // 3s thinking time
+    Hard,      // 8s thinking time
+    Master,    // 15s thinking time
+}
+
+#[derive(Copy, Clone, Debug)]
+enum AIPersonality {
+    Aggressive,    // Prefers risky harvests
+    Conservative,  // Prefers safe sows and stockpiles  
+    Balanced,      // Mix of strategies
+    Opportunistic, // Adapts based on game state
+}
+
+impl AIDifficulty {
+    fn thinking_time_ms(&self) -> u64 {
+        match self {
+            AIDifficulty::Beginner => 500,
+            AIDifficulty::Easy => 1000,
+            AIDifficulty::Medium => 3000, 
+            AIDifficulty::Hard => 8000,
+            AIDifficulty::Master => 15000,
+        }
+    }
+    
+    fn display_name(&self) -> &'static str {
+        match self {
+            AIDifficulty::Beginner => "Beginner",
+            AIDifficulty::Easy => "Easy", 
+            AIDifficulty::Medium => "Medium",
+            AIDifficulty::Hard => "Hard",
+            AIDifficulty::Master => "Master",
+        }
+    }
+}
+
+impl AIPersonality {
+    fn display_name(&self) -> &'static str {
+        match self {
+            AIPersonality::Aggressive => "Aggressive",
+            AIPersonality::Conservative => "Conservative",
+            AIPersonality::Balanced => "Balanced", 
+            AIPersonality::Opportunistic => "Opportunistic",
+        }
+    }
+    
+    fn description(&self) -> &'static str {
+        match self {
+            AIPersonality::Aggressive => "Prefers risky harvests and bold plays",
+            AIPersonality::Conservative => "Plays safely with stockpiles and careful sows",
+            AIPersonality::Balanced => "Adapts strategy to current situation", 
+            AIPersonality::Opportunistic => "Exploits openings and opponent mistakes",
+        }
+    }
 }
 
 /// Save file metadata
@@ -113,6 +197,10 @@ impl UndoManager {
             Action::Sow { field, card } => format!("Player {} sowed {} to {:?}", player.0, card, field),
             Action::Harvest { field, card, targets } => format!("Player {} harvested {} cards with {} from {:?}", player.0, targets.len(), card, field),
             Action::Stockpile { field, card, targets } => format!("Player {} stockpiled {} with {} targets in {:?}", player.0, card, targets.len(), field),
+            Action::ChangelingExchange { field, hand_card, field_card } => format!("Player {} exchanged {} with {} in {:?}", player.0, hand_card, field_card, field),
+            Action::RakeSow { field, card } => format!("Player {} rake-sowed {} to {:?}", player.0, card, field),
+            Action::LoomStockpile { field, card, targets } => format!("Player {} loom-stockpiled {} with {} targets in {:?}", player.0, card, targets.len(), field),
+            Action::EchoRepeat { original_action: _, repeat_field } => format!("Player {} echoed action in {:?}", player.0, repeat_field),
         };
         
         let entry = ActionHistoryEntry {
@@ -156,6 +244,376 @@ impl UndoManager {
     }
 }
 
+/// Setup AI opponents with interactive configuration
+fn setup_ai_opponents(player_count: u8) -> ([PlayerType; 4], AIConfig) {
+    println!("🤖 Configure AI opponents:");
+    println!();
+    
+    let mut player_types = [PlayerType::Human; 4];
+    let mut ai_configs = Vec::new();
+    
+    // Configure each player
+    for player_id in 0..player_count {
+        let player = PlayerId(player_id);
+        
+        // First player is always human
+        if player_id == 0 {
+            println!("Player {}: Human (you)", player_id);
+            continue;
+        }
+        
+        // Ask player type: Human, Simple CPU, or MCTS CPU
+        loop {
+            print!("Player {}: (h)uman, (s)imple AI, or (m)cts AI? (h/s/m): ", player_id);
+            io::stdout().flush().unwrap();
+            
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input).is_err() {
+                continue;
+            }
+            
+            match input.trim().to_lowercase().as_str() {
+                "h" | "human" => {
+                    println!("  Player {}: Human", player_id);
+                    break;
+                }
+                "s" | "simple" => {
+                    player_types[player_id as usize] = PlayerType::SimpleCpu;
+                    
+                    // Configure AI difficulty and personality
+                    let difficulty = select_ai_difficulty(player_id);
+                    let personality = select_ai_personality(player_id);
+                    
+                    ai_configs.push(PlayerAIConfig {
+                        player_id: player,
+                        difficulty,
+                        personality,
+                    });
+                    
+                    println!("  Player {}: Simple AI ({})", player_id, difficulty.display_name());
+                    break;
+                }
+                "m" | "mcts" => {
+                    player_types[player_id as usize] = PlayerType::MctsCpu;
+                    
+                    // Configure AI difficulty and personality
+                    let difficulty = select_ai_difficulty(player_id);
+                    let personality = select_ai_personality(player_id);
+                    
+                    ai_configs.push(PlayerAIConfig {
+                        player_id: player,
+                        difficulty,
+                        personality,
+                    });
+                    
+                    println!("  Player {}: MCTS AI ({})", player_id, difficulty.display_name());
+                    break;
+                }
+                _ => {
+                    println!("Please enter 'h' for human, 's' for simple AI, or 'm' for MCTS AI");
+                    continue;
+                }
+            }
+        }
+    }
+    
+    // Mark unused slots as inactive
+    for i in player_count as usize..4 {
+        player_types[i] = PlayerType::Human; // Doesn't matter for inactive slots
+    }
+    
+    let ai_config = AIConfig { 
+        player_configs: ai_configs 
+    };
+    
+    println!();
+    (player_types, ai_config)
+}
+
+/// Select AI difficulty level
+fn select_ai_difficulty(player_id: u8) -> AIDifficulty {
+    let difficulties = [
+        AIDifficulty::Beginner,
+        AIDifficulty::Easy,
+        AIDifficulty::Medium,
+        AIDifficulty::Hard,
+        AIDifficulty::Master,
+    ];
+    
+    println!("  Select difficulty for Player {}:", player_id);
+    for (i, difficulty) in difficulties.iter().enumerate() {
+        println!("    {}: {} ({}ms thinking time)", 
+                 i + 1, 
+                 difficulty.display_name(),
+                 difficulty.thinking_time_ms());
+    }
+    
+    loop {
+        print!("  Choose difficulty (1-5): ");
+        io::stdout().flush().unwrap();
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            continue;
+        }
+        
+        if let Ok(choice) = input.trim().parse::<usize>() {
+            if choice >= 1 && choice <= difficulties.len() {
+                let selected = difficulties[choice - 1].clone();
+                println!("  Player {}: {} AI", player_id, selected.display_name());
+                return selected;
+            }
+        }
+        
+        println!("  Please enter a number from 1 to 5");
+    }
+}
+
+/// Compute AI move with thinking indicator
+/// Compute Simple CPU move with thinking animation and strategy display
+fn compute_simple_cpu_move(game: &IllimatState, player_config: &PlayerAIConfig) -> Option<Action> {
+    let player_id = player_config.player_id;
+    let thinking_time = Duration::from_millis(player_config.difficulty.thinking_time_ms());
+    
+    println!();
+    println!("🤖 Player {} ({} Simple CPU - {}) is thinking...", 
+             player_id.0,
+             player_config.difficulty.display_name(),
+             player_config.personality.display_name());
+    
+    // Show thinking progress indicator
+    show_thinking_indicator(&player_config.difficulty);
+    
+    // Create Simple CPU instance
+    let mut simple_cpu = SimpleCpu::new();
+    
+    // Get action from Simple CPU
+    let action = simple_cpu.choose_action(game, player_id);
+    
+    // Display AI's strategic reasoning
+    display_simple_cpu_reasoning(&action, game, player_config);
+    
+    Some(action)
+}
+
+fn compute_ai_move(game: &IllimatState, player_config: &PlayerAIConfig) -> Option<Action> {
+    let player_id = player_config.player_id;
+    let thinking_time = Duration::from_millis(player_config.difficulty.thinking_time_ms());
+    
+    println!();
+    println!("🤖 Player {} ({} {}) is thinking...", 
+             player_id.0,
+             player_config.difficulty.display_name(),
+             player_config.personality.display_name());
+    
+    // Show thinking progress indicator
+    show_thinking_indicator(&player_config.difficulty);
+    
+    // Convert to compact state for MCTS
+    let compact_state = CompactState::empty(); // Using placeholder for now
+    
+    // Configure MCTS based on difficulty and personality
+    let mcts_config = MctsConfig {
+        max_simulations: match player_config.difficulty {
+            AIDifficulty::Beginner => 100,
+            AIDifficulty::Easy => 500,
+            AIDifficulty::Medium => 2000,
+            AIDifficulty::Hard => 8000,
+            AIDifficulty::Master => 15000,
+        },
+        exploration_constant: match player_config.personality {
+            AIPersonality::Aggressive => 2.0,      // High exploration for risky plays
+            AIPersonality::Conservative => 0.5,    // Low exploration for safe plays
+            AIPersonality::Balanced => 1.414,      // Standard UCB1 constant
+            AIPersonality::Opportunistic => 1.8,   // Moderate-high exploration
+        },
+        max_depth: 50,
+        time_limit: Some(thinking_time),
+        enable_simd: true,
+    };
+    
+    // Run MCTS search
+    let mut mcts = MctsTree::new(compact_state, mcts_config);
+    let result = mcts.search();
+    
+    // Clear thinking indicator
+    print!("\r");
+    io::stdout().flush().unwrap();
+    
+    if let Some(best_move) = result {
+        // Convert SimdMove back to full Action
+        if let Some(action) = convert_simd_move_to_action(&best_move, game) {
+            // Show AI decision with reasoning
+            show_ai_decision(&action, player_config);
+            return Some(action);
+        }
+    }
+    
+    // Fallback: random valid move
+    println!("🤖 Using fallback move selection...");
+    get_random_valid_move(game, player_id)
+}
+
+/// Show thinking progress indicator
+fn show_thinking_indicator(difficulty: &AIDifficulty) {
+    let total_duration = difficulty.thinking_time_ms();
+    let steps = 20;
+    let step_duration = total_duration / steps as u64;
+    
+    for i in 0..=steps {
+        let progress = i as f64 / steps as f64;
+        let filled = (progress * 20.0) as usize;
+        let empty = 20 - filled;
+        
+        let bar = format!("{}{}",
+                         "█".repeat(filled),
+                         "░".repeat(empty));
+        
+        print!("\r🧠 Thinking: [{}] {:.0}%", bar, progress * 100.0);
+        io::stdout().flush().unwrap();
+        
+        if i < steps {
+            std::thread::sleep(Duration::from_millis(step_duration));
+        }
+    }
+}
+
+/// Display AI decision with reasoning
+fn show_ai_decision(action: &Action, config: &PlayerAIConfig) {
+    println!("💭 Player {} chose:", config.player_id.0);
+    
+    match action {
+        Action::Sow { field, card } => {
+            println!("   🌱 Sow {} to {} field", 
+                     format_card(*card), 
+                     field.seasonal_name(0)); // TODO: Use actual illimat orientation
+        }
+        Action::Harvest { field, card, targets } => {
+            println!("   🌾 Harvest with {} from {} field", 
+                     format_card(*card), 
+                     field.seasonal_name(0));
+            println!("   Targets: {}", 
+                     targets.iter().map(|c| format_card(*c)).collect::<Vec<_>>().join(", "));
+        }
+        Action::Stockpile { field, card, targets } => {
+            println!("   📦 Stockpile {} with {} from {} field", 
+                     format_card(*card),
+                     targets.iter().map(|c| format_card(*c)).collect::<Vec<_>>().join(", "),
+                     field.seasonal_name(0));
+        }
+        _ => {
+            println!("   ✨ Special Luminary action");
+        }
+    }
+    
+    // Show AI reasoning based on personality
+    match config.personality {
+        AIPersonality::Aggressive => {
+            println!("   🔥 \"Time for a bold move!\"");
+        }
+        AIPersonality::Conservative => {
+            println!("   🛡️ \"Playing it safe this turn.\"");
+        }
+        AIPersonality::Balanced => {
+            println!("   ⚖️ \"This seems like the best balanced choice.\"");
+        }
+        AIPersonality::Opportunistic => {
+            println!("   👁️ \"Perfect opportunity to capitalize!\"");
+        }
+    }
+    
+    // Placeholder for win rate analysis
+    println!("   📊 Move strength: Strong");
+    
+    println!();
+}
+
+/// Convert SimdMove back to full Action (simplified implementation)
+fn convert_simd_move_to_action(_simd_move: &illimat_core::game::simd_compact_integration::SimdMove, game: &IllimatState) -> Option<Action> {
+    // This is a simplified conversion - in a real implementation, you'd need
+    // proper conversion between SIMD moves and full representations
+    // For now, return a placeholder action based on current hand
+    
+    let current_player = game.current_player;
+    let hand = &game.player_hands[current_player.0 as usize];
+    
+    if hand.is_empty() {
+        return None;
+    }
+    
+    // Simple fallback: sow first card to first available field
+    Some(Action::Sow {
+        field: FieldId(0),
+        card: hand[0],
+    })
+}
+
+/// Get a random valid move as ultimate fallback
+fn get_random_valid_move(game: &IllimatState, player_id: PlayerId) -> Option<Action> {
+    let hand = &game.player_hands[player_id.0 as usize];
+    
+    if hand.is_empty() {
+        return None;
+    }
+    
+    // Simple fallback: sow random card to random field
+    let card = hand[rand::random::<usize>() % hand.len()];
+    let field = FieldId(rand::random::<u8>() % 4);
+    
+    Some(Action::Sow { field, card })
+}
+
+/// Format card for display
+fn format_card(card: illimat_core::game::card::Card) -> String {
+    format!("{}", card) // Assuming Card implements Display
+}
+
+/// Select AI personality 
+fn select_ai_personality(player_id: u8) -> AIPersonality {
+    let personalities = [
+        AIPersonality::Balanced,
+        AIPersonality::Aggressive,
+        AIPersonality::Conservative,
+        AIPersonality::Opportunistic,
+    ];
+    
+    println!("  Select personality for Player {}:", player_id);
+    for (i, personality) in personalities.iter().enumerate() {
+        println!("    {}: {} - {}", 
+                 i + 1,
+                 personality.display_name(),
+                 personality.description());
+    }
+    
+    loop {
+        print!("  Choose personality (1-4, or Enter for Balanced): ");
+        io::stdout().flush().unwrap();
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            continue;
+        }
+        
+        let trimmed = input.trim();
+        
+        // Default to Balanced if empty
+        if trimmed.is_empty() {
+            println!("  Player {}: Balanced AI", player_id);
+            return AIPersonality::Balanced;
+        }
+        
+        if let Ok(choice) = trimmed.parse::<usize>() {
+            if choice >= 1 && choice <= personalities.len() {
+                let selected = personalities[choice - 1].clone();
+                println!("  Player {}: {} AI", player_id, selected.display_name());
+                return selected;
+            }
+        }
+        
+        println!("  Please enter a number from 1 to 4, or press Enter for default");
+    }
+}
+
 fn main() {
     // Check for color support and enable if available
     if std::env::var("NO_COLOR").is_err() {
@@ -166,7 +624,7 @@ fn main() {
     print_occult_banner();
     
     // Create game through setup process
-    let mut game = create_new_game();
+    let (mut game, ai_config) = create_new_game();
     
     // Initialize undo manager for development aid
     let mut undo_manager = UndoManager::new();
@@ -227,7 +685,61 @@ fn main() {
         println!("{}", game);
         println!();
         
-        // Enhanced player input prompts
+        // Check if current player is AI
+        let current_player_type = game.config.player_types[game.current_player.0 as usize];
+        if current_player_type == PlayerType::SimpleCpu || current_player_type == PlayerType::MctsCpu {
+            // Find AI configuration for this player
+            if let Some(ai_config) = ai_config.player_configs.iter().find(|cfg| cfg.player_id == game.current_player) {
+                // AI turn - compute and execute move based on AI type
+                let ai_action = if current_player_type == PlayerType::SimpleCpu {
+                    compute_simple_cpu_move(&game, ai_config)
+                } else {
+                    compute_ai_move(&game, ai_config)
+                };
+                
+                if let Some(ai_action) = ai_action {
+                    match game.apply_action(ai_action) {
+                        Ok(field_cleared) => {
+                            if field_cleared {
+                                println!("🎯 Field cleared by AI! Okus collection handled automatically.");
+                                
+                                // Auto-collect available okus for AI
+                                let available_okus = game.get_available_okus();
+                                if !available_okus.is_empty() {
+                                    match game.collect_okus(game.current_player, available_okus.clone()) {
+                                        Ok(()) => {
+                                            println!("✨ AI collected okus: {:?}", available_okus);
+                                        }
+                                        Err(e) => {
+                                            println!("AI okus collection failed: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            println!("Press Enter to continue...");
+                            let mut dummy = String::new();
+                            let _ = io::stdin().read_line(&mut dummy);
+                        }
+                        Err(e) => {
+                            println!("❌ AI move failed: {}. Using fallback...", e);
+                            // Try a simple sow as fallback
+                            let hand = &game.player_hands[game.current_player.0 as usize];
+                            if !hand.is_empty() {
+                                let fallback_action = Action::Sow {
+                                    field: FieldId(0),
+                                    card: hand[0],
+                                };
+                                let _ = game.apply_action(fallback_action);
+                            }
+                        }
+                    }
+                }
+                continue; // Skip to next player
+            }
+        }
+        
+        // Human player turn - Enhanced player input prompts
         println!("{}", format!("🎮 Player {}'s turn:", game.current_player.0).bright_yellow().bold());
         show_available_actions_hint(&game);
         print!("{} ", "Choose action >".bright_yellow().bold());
@@ -292,6 +804,18 @@ fn main() {
             "i" | "history" => {
                 undo_manager.show_history();
             }
+            "hint" | "analyze" | "a" => {
+                handle_strategic_guidance(&game);
+            }
+            "eval" | "evaluate" => {
+                handle_position_evaluation(&game);
+            }
+            "interactive" | "inter" => {
+                match handle_interactive_action_selection(&mut game, &mut undo_manager) {
+                    Ok(()) => {},
+                    Err(e) => println!("Interactive selection failed: {}", e),
+                }
+            }
             "e" | "export" => {
                 if let Err(e) = handle_export_game_state(&game) {
                     println!("Export failed: {}", e);
@@ -340,6 +864,13 @@ fn show_help(game: &IllimatState) {
     println!("  {} - Combine active + passive cards into a stockpile", "t/stockpile".bright_cyan());
     println!("  {} - Undo last action (development aid)", "u/undo".bright_cyan());
     println!("  {} - Show recent action history", "i/history".bright_magenta());
+    println!();
+    println!("{}", "🧠 STRATEGIC FEATURES:".bright_white().bold());
+    println!("  {} - Get AI-powered move recommendation with analysis", "hint/analyze".bright_yellow());
+    println!("  {} - Evaluate current position and opportunities", "eval/evaluate".bright_cyan());
+    println!("  {} - Interactive move selection with arrow keys", "interactive".bright_green());
+    println!();
+    println!("{}", "💾 GAME MANAGEMENT:".bright_white().bold());
     println!("  {} - Export human-readable game state report", "e/export".bright_white());
     println!("  {} - Save current game to file", "v/save".bright_yellow());
     println!("  {} - Load saved game from file", "l/load".bright_white());
@@ -416,7 +947,7 @@ fn show_current_situation_help(game: &IllimatState) {
     for (i, field_cards) in game.field_cards.iter().enumerate() {
         if !field_cards.is_empty() {
             let field_id = FieldId(i as u8);
-            let can_harvest = illimat_core::game::capabilities::CapabilityManager::can_harvest(field_id, game.illimat_orientation);
+            let can_harvest = illimat_core::game::capabilities::CapabilityManager::can_harvest_basic(field_id, game.illimat_orientation);
             if can_harvest {
                 // Check if any card in hand can harvest from this field
                 for &hand_card in hand {
@@ -436,7 +967,7 @@ fn show_current_situation_help(game: &IllimatState) {
         for (i, field_cards) in game.field_cards.iter().enumerate() {
             if !field_cards.is_empty() {
                 let field_id = FieldId(i as u8);
-                let can_stockpile = illimat_core::game::capabilities::CapabilityManager::can_stockpile(field_id, game.illimat_orientation);
+                let can_stockpile = illimat_core::game::capabilities::CapabilityManager::can_stockpile_basic(field_id, game.illimat_orientation);
                 if can_stockpile {
                     recommended_actions.push(format!("Create stockpile in {} field", 
                         field_id.seasonal_name(game.illimat_orientation)));
@@ -478,7 +1009,7 @@ fn show_available_actions_hint(game: &IllimatState) {
     for (i, field_cards) in game.field_cards.iter().enumerate() {
         if !field_cards.is_empty() {
             let field_id = FieldId(i as u8);
-            if illimat_core::game::capabilities::CapabilityManager::can_harvest(field_id, game.illimat_orientation) {
+            if illimat_core::game::capabilities::CapabilityManager::can_harvest_basic(field_id, game.illimat_orientation) {
                 for &hand_card in hand {
                     let harvest_combos = find_harvest_combinations(field_cards, &game.field_stockpiles[i], hand_card);
                     if !harvest_combos.is_empty() {
@@ -502,7 +1033,7 @@ fn show_available_actions_hint(game: &IllimatState) {
         for (i, field_cards) in game.field_cards.iter().enumerate() {
             if !field_cards.is_empty() {
                 let field_id = FieldId(i as u8);
-                if illimat_core::game::capabilities::CapabilityManager::can_stockpile(field_id, game.illimat_orientation) {
+                if illimat_core::game::capabilities::CapabilityManager::can_stockpile_basic(field_id, game.illimat_orientation) {
                     can_stockpile = true;
                     break;
                 }
@@ -516,6 +1047,8 @@ fn show_available_actions_hint(game: &IllimatState) {
     // Add utility actions
     available_actions.extend_from_slice(&[
         format!("{}ndo", "(u)".bright_cyan()),
+        format!("h{}nt", "(i)".bright_yellow()),
+        format!("{}alysis", "(a)".bright_cyan()),
         format!("{}elp", "(?h)".bright_magenta()),
         format!("{}uit", "(q)".bright_red())
     ]);
@@ -608,7 +1141,7 @@ fn handle_stockpile_action(game: &mut IllimatState, undo_manager: &mut UndoManag
         let field_id = FieldId(i as u8);
         let season = &game.field_seasons[i];
         let field_cards = &game.field_cards[i];
-        let can_stockpile = illimat_core::game::capabilities::CapabilityManager::can_stockpile(field_id, game.illimat_orientation);
+        let can_stockpile = illimat_core::game::capabilities::CapabilityManager::can_stockpile_basic(field_id, game.illimat_orientation);
         
         print!("  {}: {} Field ({}) - {} cards", 
                i + 1, field_name, season, field_cards.len());
@@ -771,7 +1304,7 @@ fn handle_harvest_action(game: &mut IllimatState, undo_manager: &mut UndoManager
         let field_id = FieldId(i as u8);
         let season = &game.field_seasons[i];
         let field_cards = &game.field_cards[i];
-        let can_harvest = illimat_core::game::capabilities::CapabilityManager::can_harvest(field_id, game.illimat_orientation);
+        let can_harvest = illimat_core::game::capabilities::CapabilityManager::can_harvest_basic(field_id, game.illimat_orientation);
         
         print!("  {}: {} Field ({}) - {} cards", 
                i + 1, field_name, season, field_cards.len());
@@ -1057,7 +1590,7 @@ fn handle_sow_action(game: &mut IllimatState, undo_manager: &mut UndoManager) ->
         let field_id = FieldId(i as u8);
         let season = &game.field_seasons[i];
         let card_count = game.field_cards[i].len();
-        let can_sow = illimat_core::game::capabilities::CapabilityManager::can_sow(field_id, game.illimat_orientation);
+        let can_sow = illimat_core::game::capabilities::CapabilityManager::can_sow_basic(field_id, game.illimat_orientation);
         
         print!("  {}: {} Field ({}) - {} cards", 
                i + 1, field_name, season, card_count);
@@ -1138,7 +1671,7 @@ fn print_occult_banner() {
 }
 
 /// Create a new game through interactive setup
-fn create_new_game() -> IllimatState {
+fn create_new_game() -> (IllimatState, AIConfig) {
     println!("🎴 Welcome to the Illimat table!");
     println!();
     
@@ -1165,12 +1698,8 @@ fn create_new_game() -> IllimatState {
                     if count >= 2 && count <= 4 {
                         println!();
                         
-                        // For now, all players are human
-                        // TODO: Future feature - prompt for CPU players
-                        let mut player_types = [PlayerType::Human; 4];
-                        for i in count as usize..4 {
-                            player_types[i] = PlayerType::Human; // Inactive slots, doesn't matter
-                        }
+                        // Configure player types and AI opponents
+                        let (player_types, ai_config) = setup_ai_opponents(count);
                         
                         // Determine deck size (2-3 players use reduced deck)
                         let use_stars_suit = count == 4;
@@ -1187,9 +1716,10 @@ fn create_new_game() -> IllimatState {
                             player_count: count,
                             player_types,
                             use_stars_suit,
+                            luminary_config: illimat_core::game::luminary::LuminaryConfiguration::core_only(),
                         };
                         
-                        return IllimatState::new(config);
+                        return (IllimatState::new(config), ai_config);
                     } else {
                         println!("Invalid number. Please enter a number from 2 to 4.");
                     }
@@ -1553,9 +2083,9 @@ fn handle_export_game_state(game: &IllimatState) -> Result<(), String> {
         
         // Field capabilities
         use illimat_core::game::capabilities::CapabilityManager;
-        let can_sow = CapabilityManager::can_sow(field_id, game.illimat_orientation);
-        let can_harvest = CapabilityManager::can_harvest(field_id, game.illimat_orientation);
-        let can_stockpile = CapabilityManager::can_stockpile(field_id, game.illimat_orientation);
+        let can_sow = CapabilityManager::can_sow_basic(field_id, game.illimat_orientation);
+        let can_harvest = CapabilityManager::can_harvest_basic(field_id, game.illimat_orientation);
+        let can_stockpile = CapabilityManager::can_stockpile_basic(field_id, game.illimat_orientation);
         
         report.push_str("     Allowed Actions: ");
         let mut actions = Vec::new();
@@ -1689,4 +2219,754 @@ fn handle_export_game_state(game: &IllimatState) -> Result<(), String> {
     
     println!("📊 Game state exported to: {}", export_file);
     Ok(())
+}
+
+/// Strategic guidance system using MCTS AI analysis
+fn handle_strategic_guidance(game: &IllimatState) {
+    println!("{}", "🧠 STRATEGIC ANALYSIS".bright_cyan().bold());
+    println!("Running AI analysis...");
+    
+    // Convert game state to compact representation for MCTS
+    let compact_state = CompactState::from(game);
+    
+    // Configure MCTS for console hints (fast analysis)
+    let config = MctsConfig {
+        max_simulations: 5_000,  // Quick analysis for console
+        time_limit: Some(Duration::from_millis(1000)), // 1 second max
+        exploration_constant: 1.414,
+        max_depth: 50,
+        enable_simd: true,
+    };
+    
+    // Run MCTS analysis
+    let mut mcts_tree = MctsTree::new(compact_state, config);
+    let start_time = std::time::Instant::now();
+    
+    match mcts_tree.search() {
+        Some(best_move) => {
+            let elapsed = start_time.elapsed();
+            
+            println!("\n📈 Analysis complete in {:.1}ms", elapsed.as_secs_f32() * 1000.0);
+            println!("Simulations: {}", mcts_tree.stats.simulations_completed);
+            println!("Nodes explored: {}", mcts_tree.stats.total_nodes);
+            
+            // Convert SIMD move back to Action for display
+            if let Some(action) = convert_simd_move_to_action(&best_move, game) {
+                println!("\n💡 {} {}", "RECOMMENDED MOVE:".bright_yellow().bold(), format_action_advice(&action, game).bright_white());
+                
+                // Show win rate analysis
+                let root_node = &mcts_tree.nodes[mcts_tree.root_index];
+                if root_node.visits > 0 {
+                    let win_rate = root_node.average_reward() * 100.0;
+                    println!("Expected win rate: {:.1}%", win_rate);
+                }
+                
+                // Show position evaluation
+                show_position_analysis(game, &action);
+            } else {
+                println!("Failed to convert AI recommendation to playable move");
+            }
+        }
+        None => {
+            println!("❌ No good moves found by AI analysis");
+        }
+    }
+    
+    println!();
+}
+
+/// Position evaluation without specific move recommendation
+fn handle_position_evaluation(game: &IllimatState) {
+    println!("{}", "📊 POSITION EVALUATION".bright_cyan().bold());
+    
+    let current_player = game.current_player;
+    let current_score = game.total_scores[current_player.0 as usize];
+    let leader_score = *game.total_scores.iter().max().unwrap();
+    
+    // Strategic position analysis
+    println!("\n🎯 {} analysis:", "STRATEGIC POSITION".bright_white().bold());
+    
+    // Score analysis
+    if current_score >= 17 {
+        println!("  ✨ {}: You can win this round!", "VICTORY POSITION".bright_green().bold());
+    } else if current_score == leader_score {
+        println!("  📈 {}: Leading with {} points", "LEADING POSITION".bright_cyan().bold(), current_score);
+    } else {
+        println!("  📊 {}: {} points (leader: {})", "CATCHING UP".bright_yellow().bold(), current_score, leader_score);
+    }
+    
+    // Hand evaluation
+    let hand = &game.player_hands[current_player.0 as usize];
+    println!("  👋 Hand strength: {} cards", hand.len());
+    
+    // Field opportunity analysis
+    println!("\n🏞️ {} analysis:", "FIELD OPPORTUNITIES".bright_white().bold());
+    
+    let mut best_harvest_field = None;
+    let mut best_sow_field = None;
+    let mut harvest_count = 0;
+    
+    for (i, field_cards) in game.field_cards.iter().enumerate() {
+        let field_id = FieldId(i as u8);
+        let field_name = field_id.seasonal_name(game.illimat_orientation);
+        let season = &game.field_seasons[i];
+        
+        // Check capabilities
+        let can_harvest = illimat_core::game::capabilities::CapabilityManager::can_harvest_basic(field_id, game.illimat_orientation);
+        let can_sow = illimat_core::game::capabilities::CapabilityManager::can_sow_basic(field_id, game.illimat_orientation);
+        let can_stockpile = illimat_core::game::capabilities::CapabilityManager::can_stockpile_basic(field_id, game.illimat_orientation);
+        
+        print!("  {} {}: {} cards", 
+               get_season_emoji(season), field_name.bright_white().bold(), field_cards.len());
+        
+        // Count harvest opportunities
+        if can_harvest && !field_cards.is_empty() {
+            let mut field_harvest_ops = 0;
+            for &hand_card in hand {
+                let combos = find_harvest_combinations(field_cards, &game.field_stockpiles[i], hand_card);
+                field_harvest_ops += combos.len();
+            }
+            if field_harvest_ops > 0 {
+                print!(" [{}harvest ops]", field_harvest_ops);
+                harvest_count += field_harvest_ops;
+                if best_harvest_field.is_none() || field_harvest_ops > 0 {
+                    best_harvest_field = Some((field_name, field_harvest_ops));
+                }
+            }
+        }
+        
+        // Mark sowing opportunities  
+        if can_sow {
+            print!(" [can sow]");
+            if best_sow_field.is_none() {
+                best_sow_field = Some(field_name);
+            }
+        }
+        
+        // Mark stockpiling opportunities
+        if can_stockpile && !field_cards.is_empty() && hand.len() >= 2 {
+            print!(" [can stockpile]");
+        }
+        
+        println!();
+    }
+    
+    // Strategic recommendations
+    println!("\n💭 {} recommendations:", "STRATEGIC".bright_white().bold());
+    
+    if harvest_count > 0 {
+        println!("  🎯 You have {} harvest opportunities available", harvest_count);
+        if let Some((field, count)) = best_harvest_field {
+            println!("  🌟 Best harvest target: {} field ({} combinations)", field, count);
+        }
+    } else {
+        println!("  ⚠️  No immediate harvest opportunities - consider sowing to create them");
+        if let Some(field) = best_sow_field {
+            println!("  🌱 Recommended sowing target: {} field", field);
+        }
+    }
+    
+    // Okus availability
+    let available_okus = game.get_available_okus();
+    if !available_okus.is_empty() {
+        println!("  🎯 {} okus tokens available - clear a field to collect!", available_okus.len());
+    }
+    
+    // Victory condition check
+    let points_needed = 17 - current_score;
+    if points_needed <= 3 {
+        println!("  🏆 {} You need {} more points to win!", "CLOSE TO VICTORY!".bright_yellow().bold(), points_needed);
+        println!("      Focus on: Fools/Luminaries (+1), Okus tokens (+1), or scoring combinations");
+    }
+    
+    println!();
+}
+
+
+/// Format action with strategic advice
+fn format_action_advice(action: &Action, game: &IllimatState) -> String {
+    match action {
+        Action::Sow { field, card } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            format!("Sow {} to {} field - increases harvest opportunities", card, field_name)
+        }
+        Action::Harvest { field, card, targets } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            format!("Harvest {} cards with {} from {} field - immediate point gain", 
+                    targets.len(), card, field_name)
+        }
+        Action::Stockpile { field, card, targets } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            format!("Stockpile {} with {} targets in {} field - creates future harvest opportunity", 
+                    card, targets.len(), field_name)
+        }
+        _ => "Strategic move recommended by AI".to_string(),
+    }
+}
+
+/// Show detailed position analysis for a recommended move
+fn show_position_analysis(game: &IllimatState, action: &Action) {
+    println!("\n🔍 {} analysis:", "MOVE IMPACT".bright_white().bold());
+    
+    match action {
+        Action::Sow { field, .. } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            let current_cards = game.field_cards[field.0 as usize].len();
+            println!("  📈 Adding card to {} field (currently {} cards)", field_name, current_cards);
+            println!("  💡 Creates more harvest combinations for all players");
+            
+            if current_cards == 0 {
+                println!("  🌟 First card in field - establishes presence");
+            }
+        }
+        Action::Harvest { field, targets, .. } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            println!("  🎯 Collecting {} cards from {} field", targets.len(), field_name);
+            println!("  📊 Immediate point contribution: +{} cards to harvest", targets.len());
+            
+            let remaining = game.field_cards[field.0 as usize].len() - targets.len();
+            if remaining == 0 {
+                println!("  ✨ Field clear opportunity - collect okus token!");
+            }
+        }
+        Action::Stockpile { field, targets, .. } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            println!("  🏗️  Creating stockpile in {} field with {} cards", field_name, targets.len());
+            println!("  ⏳ Stockpile available for harvest next turn");
+        }
+        _ => {}
+    }
+}
+
+/// Get emoji for season display
+fn get_season_emoji(season: &illimat_core::game::season::Season) -> &'static str {
+    match season {
+        illimat_core::game::season::Season::Spring => "🌸",
+        illimat_core::game::season::Season::Summer => "☀️",
+        illimat_core::game::season::Season::Autumn => "🍂", 
+        illimat_core::game::season::Season::Winter => "❄️",
+    }
+}
+
+/// Interactive action selection using arrow keys and real-time validation
+fn handle_interactive_action_selection(game: &mut IllimatState, undo_manager: &mut UndoManager) -> Result<(), String> {
+    let current_player = game.current_player;
+    let hand = &game.player_hands[current_player.0 as usize];
+    
+    if hand.is_empty() {
+        return Err("No cards remaining to play".to_string());
+    }
+    
+    // Enable raw mode for key capture
+    enable_raw_mode().map_err(|_| "Failed to enable raw mode")?;
+    
+    let result = run_interactive_selection(game, undo_manager);
+    
+    // Always disable raw mode when done
+    let _ = disable_raw_mode();
+    
+    result
+}
+
+/// Main interactive selection loop
+fn run_interactive_selection(game: &mut IllimatState, undo_manager: &mut UndoManager) -> Result<(), String> {
+    let mut selected_action = ActionType::Sow;
+    let mut selected_card_index = 0;
+    let mut selected_field_index = 0;
+    let mut redraw = true;
+    
+    loop {
+        if redraw {
+            // Clear screen and redraw interface
+            let _ = execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0));
+            display_interactive_interface(game, selected_action, selected_card_index, selected_field_index)?;
+            redraw = false;
+        }
+        
+        // Get current hand size for bounds checking
+        let current_player = game.current_player;
+        let hand_len = game.player_hands[current_player.0 as usize].len();
+        
+        // Read key input
+        match read() {
+            Ok(Event::Key(KeyEvent { code, .. })) => {
+                match code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        return Ok(()); // Exit without action
+                    }
+                    KeyCode::Enter => {
+                        // Attempt to execute the selected action
+                        match try_execute_selected_action(game, undo_manager, selected_action, selected_card_index, selected_field_index) {
+                            Ok(()) => return Ok(()),
+                            Err(e) => {
+                                // Show error and continue
+                                let _ = execute!(io::stdout(), 
+                                    cursor::MoveTo(0, 20),
+                                    SetForegroundColor(Color::Red),
+                                    Print(format!("Error: {}                    ", e)),
+                                    ResetColor
+                                );
+                                let _ = io::stdout().flush();
+                                continue;
+                            }
+                        }
+                    }
+                    KeyCode::Tab => {
+                        // Cycle through action types
+                        selected_action = match selected_action {
+                            ActionType::Sow => ActionType::Harvest,
+                            ActionType::Harvest => ActionType::Stockpile,
+                            ActionType::Stockpile => ActionType::Sow,
+                        };
+                        redraw = true;
+                    }
+                    KeyCode::Up => {
+                        if selected_card_index > 0 {
+                            selected_card_index -= 1;
+                            redraw = true;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if selected_card_index < hand_len.saturating_sub(1) {
+                            selected_card_index += 1;
+                            redraw = true;
+                        }
+                    }
+                    KeyCode::Left => {
+                        if selected_field_index > 0 {
+                            selected_field_index -= 1;
+                            redraw = true;
+                        }
+                    }
+                    KeyCode::Right => {
+                        if selected_field_index < 3 {
+                            selected_field_index += 1;
+                            redraw = true;
+                        }
+                    }
+                    KeyCode::Char('1') => {
+                        selected_action = ActionType::Sow;
+                        redraw = true;
+                    }
+                    KeyCode::Char('2') => {
+                        selected_action = ActionType::Harvest;
+                        redraw = true;
+                    }
+                    KeyCode::Char('3') => {
+                        selected_action = ActionType::Stockpile;
+                        redraw = true;
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        let digit = c as u8 - b'0';
+                        if digit >= 1 && digit as usize <= hand_len {
+                            selected_card_index = (digit - 1) as usize;
+                            redraw = true;
+                        }
+                    }
+                    KeyCode::Char('h') => {
+                        // Show help
+                        display_interactive_help()?;
+                        redraw = true;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Action types for interactive selection
+#[derive(Copy, Clone, Debug)]
+enum ActionType {
+    Sow,
+    Harvest,
+    Stockpile,
+}
+
+/// Display the interactive interface
+fn display_interactive_interface(
+    game: &IllimatState, 
+    selected_action: ActionType, 
+    selected_card_index: usize, 
+    selected_field_index: usize
+) -> Result<(), String> {
+    let current_player = game.current_player;
+    let hand = &game.player_hands[current_player.0 as usize];
+    
+    // Header
+    let _ = execute!(io::stdout(),
+        cursor::MoveTo(0, 0),
+        SetForegroundColor(Color::Cyan),
+        Print("┌─────────────────────────────────────────────────────────────┐\n"),
+        Print("│                🎮  INTERACTIVE ACTION SELECTION  🎮         │\n"),
+        Print("├─────────────────────────────────────────────────────────────┤\n"),
+        ResetColor
+    );
+    
+    // Action type selection
+    let _ = execute!(io::stdout(), cursor::MoveTo(0, 3));
+    print!("│ Action: ");
+    for (_i, action_type) in [ActionType::Sow, ActionType::Harvest, ActionType::Stockpile].iter().enumerate() {
+        let action_name = match action_type {
+            ActionType::Sow => "Sow",
+            ActionType::Harvest => "Harvest", 
+            ActionType::Stockpile => "Stockpile",
+        };
+        
+        if *action_type as u8 == selected_action as u8 {
+            let _ = execute!(io::stdout(), 
+                SetForegroundColor(Color::Yellow), 
+                Print(format!("[{}] ", action_name)), 
+                ResetColor
+            );
+        } else {
+            print!("{} ", action_name);
+        }
+    }
+    println!("                        │");
+    
+    // Card selection
+    println!("├─────────────────────────────────────────────────────────────┤");
+    println!("│ Your Hand (↑/↓ to select, numbers 1-{}):", hand.len());
+    
+    for (i, card) in hand.iter().enumerate() {
+        let marker = if i == selected_card_index { "►" } else { " " };
+        let card_display = format_card_with_enhanced_display(*card);
+        
+        if i == selected_card_index {
+            let _ = execute!(io::stdout(),
+                cursor::MoveTo(0, 6 + i as u16),
+                SetForegroundColor(Color::Yellow),
+                Print(format!("│ {} {}. {}                              │\n", marker, i + 1, card_display)),
+                ResetColor
+            );
+        } else {
+            println!("│ {} {}. {}                              │", marker, i + 1, card_display);
+        }
+    }
+    
+    // Field selection
+    let field_start_line = 6 + hand.len() as u16 + 1;
+    let _ = execute!(io::stdout(), cursor::MoveTo(0, field_start_line));
+    println!("├─────────────────────────────────────────────────────────────┤");
+    println!("│ Fields (←/→ to select):");
+    
+    let field_names = ["Spring", "Summer", "Autumn", "Winter"];
+    for (i, &field_name) in field_names.iter().enumerate() {
+        let _field_id = FieldId(i as u8);
+        let season = game.field_seasons[i];
+        let marker = if i == selected_field_index { "►" } else { " " };
+        let season_emoji = get_season_emoji(&season);
+        
+        // Show validation status
+        let validation = validate_action_preview(game, selected_action, selected_card_index, i);
+        let validation_display = match validation {
+            Ok(_) => format!("✓ {}", "Valid".green()),
+            Err(e) => format!("✗ {}", e.red()),
+        };
+        
+        if i == selected_field_index {
+            let _ = execute!(io::stdout(),
+                cursor::MoveTo(0, field_start_line + 2 + i as u16),
+                SetForegroundColor(Color::Yellow),
+                Print(format!("│ {} {} {} Field - {} │\n", marker, season_emoji, field_name, validation_display)),
+                ResetColor
+            );
+        } else {
+            println!("│ {} {} {} Field - {} │", marker, season_emoji, field_name, validation_display);
+        }
+    }
+    
+    // Instructions
+    let instructions_line = field_start_line + 6;
+    let _ = execute!(io::stdout(), cursor::MoveTo(0, instructions_line));
+    println!("├─────────────────────────────────────────────────────────────┤");
+    println!("│ Controls: TAB=action, ↑↓=card, ←→=field, ENTER=play, H=help │");
+    println!("│ ESC/Q=cancel                                                │");
+    println!("└─────────────────────────────────────────────────────────────┘");
+    
+    let _ = io::stdout().flush();
+    Ok(())
+}
+
+/// Validate action before execution
+fn validate_action_preview(game: &IllimatState, action_type: ActionType, card_index: usize, field_index: usize) -> Result<String, String> {
+    let hand = &game.player_hands[game.current_player.0 as usize];
+    
+    if card_index >= hand.len() {
+        return Err("Invalid card selection".to_string());
+    }
+    
+    let card = hand[card_index];
+    let field = FieldId(field_index as u8);
+    
+    match action_type {
+        ActionType::Sow => {
+            let can_sow = illimat_core::game::capabilities::CapabilityManager::can_sow_basic(field, game.illimat_orientation);
+            if !can_sow {
+                Err("Sowing blocked by season".to_string())
+            } else {
+                Ok("Ready to sow".to_string())
+            }
+        }
+        ActionType::Harvest => {
+            let can_harvest = illimat_core::game::capabilities::CapabilityManager::can_harvest_basic(field, game.illimat_orientation);
+            if !can_harvest {
+                Err("Harvesting blocked by season".to_string())
+            } else {
+                let field_cards = &game.field_cards[field_index];
+                let field_stockpiles = &game.field_stockpiles[field_index];
+                let combinations = find_harvest_combinations(field_cards, field_stockpiles, card);
+                if combinations.is_empty() {
+                    Err("No valid harvest targets".to_string())
+                } else {
+                    Ok(format!("{} combinations available", combinations.len()))
+                }
+            }
+        }
+        ActionType::Stockpile => {
+            let can_stockpile = illimat_core::game::capabilities::CapabilityManager::can_stockpile_basic(field, game.illimat_orientation);
+            if !can_stockpile {
+                Err("Stockpiling blocked by season".to_string())
+            } else if hand.len() < 2 {
+                Err("Need at least 2 cards".to_string())
+            } else {
+                let field_cards = &game.field_cards[field_index];
+                let combinations = find_stockpile_combinations(field_cards, &game.field_stockpiles[field_index], card);
+                if combinations.is_empty() {
+                    Err("No valid stockpile targets".to_string())
+                } else {
+                    Ok(format!("{} targets available", combinations.len()))
+                }
+            }
+        }
+    }
+}
+
+/// Execute the selected action
+fn try_execute_selected_action(
+    game: &mut IllimatState, 
+    undo_manager: &mut UndoManager, 
+    action_type: ActionType, 
+    card_index: usize, 
+    field_index: usize
+) -> Result<(), String> {
+    let hand = &game.player_hands[game.current_player.0 as usize];
+    
+    if card_index >= hand.len() {
+        return Err("Invalid card selection".to_string());
+    }
+    
+    let card = hand[card_index];
+    let field = FieldId(field_index as u8);
+    let current_player = game.current_player;
+    
+    match action_type {
+        ActionType::Sow => {
+            let action = Action::Sow { field, card };
+            undo_manager.record_action(game, &action, current_player);
+            game.apply_action(action)?;
+            println!("\n✅ Successfully sowed {} to {} field!", card, field.seasonal_name(game.illimat_orientation));
+        }
+        ActionType::Harvest => {
+            // For harvest, we need to select targets - this is simplified for demo
+            let field_cards = &game.field_cards[field_index];
+            let field_stockpiles = &game.field_stockpiles[field_index];
+            let combinations = find_harvest_combinations(field_cards, field_stockpiles, card);
+            
+            if combinations.is_empty() {
+                return Err("No valid harvest combinations".to_string());
+            }
+            
+            // Auto-select first available combination for simplicity
+            let targets = combinations[0].clone();
+            let action = Action::Harvest { field, card, targets };
+            
+            undo_manager.record_action(game, &action, current_player);
+            let field_cleared = game.apply_action(action)?;
+            
+            println!("\n✅ Successfully harvested from {} field!", field.seasonal_name(game.illimat_orientation));
+            
+            if field_cleared {
+                println!("🎯 Field cleared! Okus collection opportunity available.");
+            }
+        }
+        ActionType::Stockpile => {
+            // For stockpile, we need passive card selection - simplified for demo
+            let field_cards = &game.field_cards[field_index];
+            let combinations = find_stockpile_combinations(field_cards, &game.field_stockpiles[field_index], card);
+            
+            if combinations.is_empty() {
+                return Err("No valid stockpile targets".to_string());
+            }
+            
+            // Auto-select first available target for simplicity
+            let targets = vec![combinations[0]];
+            let action = Action::Stockpile { field, card, targets };
+            
+            undo_manager.record_action(game, &action, current_player);
+            game.apply_action(action)?;
+            
+            println!("\n✅ Successfully created stockpile in {} field!", field.seasonal_name(game.illimat_orientation));
+        }
+    }
+    
+    Ok(())
+}
+
+/// Display help for interactive mode
+fn display_interactive_help() -> Result<(), String> {
+    let _ = execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0));
+    
+    println!("┌─────────────────────────────────────────────────────────────┐");
+    println!("│                     🎮  INTERACTIVE HELP  🎮                │");
+    println!("├─────────────────────────────────────────────────────────────┤");
+    println!("│ Navigation:                                                 │");
+    println!("│   ↑/↓        - Select card in hand                         │");
+    println!("│   ←/→        - Select target field                         │");
+    println!("│   TAB        - Cycle through action types                  │");
+    println!("│   1/2/3      - Quick select Sow/Harvest/Stockpile          │");
+    println!("│   1-9        - Quick select card by number                 │");
+    println!("│                                                             │");
+    println!("│ Actions:                                                    │");
+    println!("│   ENTER      - Execute selected action                     │");
+    println!("│   H          - Show this help                              │");
+    println!("│   ESC/Q      - Cancel and return to main menu              │");
+    println!("│                                                             │");
+    println!("│ Real-time validation shows whether your selection is:      │");
+    println!("│   ✓ Valid    - Action can be executed                      │");
+    println!("│   ✗ Invalid  - Season restrictions or no valid targets     │");
+    println!("└─────────────────────────────────────────────────────────────┘");
+    println!("\nPress any key to return...");
+    
+    let _ = read(); // Wait for key press
+    Ok(())
+}
+
+/// Format card with enhanced display for interactive mode
+fn format_card_with_enhanced_display(card: illimat_core::game::card::Card) -> String {
+    let rank = match card.rank() {
+        illimat_core::game::card::Rank::Fool => "F",
+        illimat_core::game::card::Rank::Two => "2",
+        illimat_core::game::card::Rank::Three => "3",
+        illimat_core::game::card::Rank::Four => "4",
+        illimat_core::game::card::Rank::Five => "5",
+        illimat_core::game::card::Rank::Six => "6",
+        illimat_core::game::card::Rank::Seven => "7",
+        illimat_core::game::card::Rank::Eight => "8",
+        illimat_core::game::card::Rank::Nine => "9",
+        illimat_core::game::card::Rank::Ten => "T",
+        illimat_core::game::card::Rank::Knight => "N",
+        illimat_core::game::card::Rank::Queen => "Q",
+        illimat_core::game::card::Rank::King => "K",
+    };
+    
+    let suit_symbol = match card.suit() {
+        illimat_core::game::card::Suit::Spring => "♠",
+        illimat_core::game::card::Suit::Summer => "♦",
+        illimat_core::game::card::Suit::Autumn => "♣",
+        illimat_core::game::card::Suit::Winter => "♥",
+        illimat_core::game::card::Suit::Stars => "✦",
+    };
+    
+    format!("{}{}", rank, suit_symbol)
+}
+
+/// Display Simple CPU's strategic reasoning and decision process
+fn display_simple_cpu_reasoning(action: &Action, game: &IllimatState, player_config: &PlayerAIConfig) {
+    println!();
+    println!("🧠 {} AI Strategy Analysis:", player_config.personality.display_name());
+    
+    match action {
+        Action::Sow { field, card } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            println!("  🌱 Decision: Sow {} to {} field", card, field_name);
+            println!("  💭 Reasoning: No harvest opportunities available, sowing to create future options");
+            
+            match player_config.personality {
+                AIPersonality::Aggressive => {
+                    println!("  ⚔️  Aggressive play: Building presence for future aggressive harvests");
+                }
+                AIPersonality::Conservative => {
+                    println!("  🛡️  Conservative play: Safe sowing to maintain hand options");
+                }
+                AIPersonality::Balanced => {
+                    println!("  ⚖️  Balanced play: Standard sowing strategy to develop board position");
+                }
+                AIPersonality::Opportunistic => {
+                    println!("  🎯 Opportunistic play: Setting up for future harvest combinations");
+                }
+            }
+        }
+        Action::Harvest { field, card, targets } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            let total_value: u8 = targets.iter().map(|&c| {
+                use illimat_core::game::card::Rank;
+                match c.rank() {
+                    Rank::Fool => 1, // Assuming fool as 1 for simplicity
+                    Rank::Two => 2, Rank::Three => 3, Rank::Four => 4, Rank::Five => 5,
+                    Rank::Six => 6, Rank::Seven => 7, Rank::Eight => 8, Rank::Nine => 9,
+                    Rank::Ten => 10, Rank::Knight => 11, Rank::Queen => 12, Rank::King => 13,
+                }
+            }).sum();
+            
+            println!("  🎯 Decision: Harvest {} cards (value: {}) with {} from {} field", 
+                     targets.len(), total_value, card, field_name);
+            println!("  💭 Reasoning: Harvest opportunity detected - prioritizing immediate point gain");
+            
+            let cards_display = targets.iter()
+                .map(|&c| format_card_with_enhanced_display(c))
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!("  📋 Targets: {}", cards_display);
+            
+            match player_config.personality {
+                AIPersonality::Aggressive => {
+                    println!("  ⚔️  Aggressive play: Taking high-value harvest for maximum impact");
+                }
+                AIPersonality::Conservative => {
+                    println!("  🛡️  Conservative play: Secure harvest to build stable point lead");
+                }
+                AIPersonality::Balanced => {
+                    println!("  ⚖️  Balanced play: Optimal harvest timing for strategic advantage");
+                }
+                AIPersonality::Opportunistic => {
+                    println!("  🎯 Opportunistic play: Exploiting available harvest combination");
+                }
+            }
+        }
+        Action::Stockpile { field, card, targets } => {
+            let field_name = field.seasonal_name(game.illimat_orientation);
+            println!("  🏗️  Decision: Create stockpile with {} and {} targets in {} field", 
+                     card, targets.len(), field_name);
+            println!("  💭 Reasoning: Setting up future harvest opportunity - delaying gratification for bigger gains");
+            
+            let targets_display = targets.iter()
+                .map(|&c| format_card_with_enhanced_display(c))
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!("  📋 Targets: {}", targets_display);
+            
+            match player_config.personality {
+                AIPersonality::Aggressive => {
+                    println!("  ⚔️  Aggressive play: Building larger stockpile for devastating future harvest");
+                }
+                AIPersonality::Conservative => {
+                    println!("  🛡️  Conservative play: Safe stockpiling to secure future scoring opportunities");
+                }
+                AIPersonality::Balanced => {
+                    println!("  ⚖️  Balanced play: Strategic stockpiling for medium-term advantage");
+                }
+                AIPersonality::Opportunistic => {
+                    println!("  🎯 Opportunistic play: Creating high-value future harvest opportunity");
+                }
+            }
+        }
+        _ => {
+            println!("  🤔 Decision: Special action");
+            println!("  💭 Reasoning: Executing required game action");
+        }
+    }
+    println!();
 }

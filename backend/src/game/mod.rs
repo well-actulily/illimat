@@ -10,10 +10,32 @@ pub mod actions;
 pub mod display;
 pub mod scoring;
 pub mod game_config;
+pub mod luminary;
+pub mod luminary_effects;
+pub mod luminary_manager;
+pub mod luminary_tests;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod turn_manager;
 pub mod bitset;
+pub mod compact_state;
 pub mod debug_cards;
 pub mod simd_optimizations;
+pub mod simd_compact_integration;
+pub mod mcts;
+pub mod simple_cpu;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcts_performance_test;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcts_reality_check;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcts_tree_scaling;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcts_tree_analysis;
 pub mod zero_copy;
+
+// Core rules verification testing
+pub mod core_rules_tests;
+pub mod comprehensive_rules_tests;
 
 pub use card::*;
 pub use state::*;

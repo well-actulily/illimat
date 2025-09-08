@@ -7,7 +7,8 @@ use crate::game::stockpile::Stockpile;
 use crate::game::game_config::{GameConfig, GamePhase};
 use crate::game::actions::{Action, ActionManager};
 use crate::game::scoring::{RoundScoring, ScoringManager};
-use crate::game::display::DisplayManager;
+// DisplayManager no longer needed - using enhanced built-in display
+use crate::game::luminary::{LuminaryCard, LuminaryState};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::fmt;
@@ -29,6 +30,10 @@ pub struct IllimatState {
     pub field_stockpiles: [Vec<Stockpile>; 4], // Stockpile sets per field
     pub field_seasons: [Season; 4],            // Current season per field
     pub okus_positions: [OkusPosition; 4],     // Position of each okus token (A-D)
+    
+    // Luminary state
+    pub field_luminaries: [LuminaryState; 4],  // Luminary in each field
+    pub luminary_deck: Vec<LuminaryCard>,      // Remaining Luminaries to draw from
     
     // Game metadata
     pub current_player: PlayerId,
@@ -86,6 +91,18 @@ impl IllimatState {
         let mut field_seasons = [Season::Spring; 4];
         SeasonManager::update_all_seasons(&mut field_seasons, illimat_orientation);
         
+        // Initialize Luminaries
+        let mut luminary_deck = config.luminary_config.get_active_luminaries();
+        luminary_deck.shuffle(&mut rng);
+        
+        // Deal one Luminary face-down to each field (if available)
+        let mut field_luminaries = [LuminaryState::None; 4];
+        for field_id in 0..4 {
+            if let Some(luminary) = luminary_deck.pop() {
+                field_luminaries[field_id] = LuminaryState::FaceDown(luminary);
+            }
+        }
+        
         let current_player = PlayerId((dealer.0 + 1) % config.player_count);
         
         IllimatState {
@@ -98,6 +115,8 @@ impl IllimatState {
             field_stockpiles: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             field_seasons,
             okus_positions: [OkusPosition::OnIllimat; 4], // All okus start on Illimat
+            field_luminaries,
+            luminary_deck,
             current_player,
             dealer,
             total_scores: [0; 4],
@@ -126,6 +145,7 @@ impl IllimatState {
                 Ok(false) // Sowing never clears fields
             },
             Action::Harvest { field, card, targets } => {
+                let harvesting_player = self.current_player; // Capture before action execution
                 let field_cleared = ActionManager::apply_harvest(
                     &mut self.field_cards,
                     &mut self.field_stockpiles,
@@ -134,7 +154,7 @@ impl IllimatState {
                     &mut self.field_seasons,
                     &mut self.illimat_orientation,
                     &mut self.turn_number,
-                    self.current_player,
+                    harvesting_player,
                     field,
                     card,
                     targets,
@@ -142,7 +162,7 @@ impl IllimatState {
                 
                 // Collect okus if field was cleared and okus are available
                 if field_cleared {
-                    self.handle_field_cleared(field, self.current_player);
+                    self.handle_field_cleared(field, harvesting_player);
                 }
                 
                 self.advance_turn();
@@ -164,6 +184,23 @@ impl IllimatState {
                 
                 self.advance_turn();
                 Ok(false) // Stockpiling never clears fields
+            },
+            // Placeholder implementations for Luminary actions
+            Action::ChangelingExchange { .. } => {
+                // TODO: Implement changeling exchange
+                Ok(false)
+            },
+            Action::RakeSow { .. } => {
+                // TODO: Implement rake sow
+                Ok(false)
+            },
+            Action::LoomStockpile { .. } => {
+                // TODO: Implement loom stockpile
+                Ok(false)
+            },
+            Action::EchoRepeat { .. } => {
+                // TODO: Implement echo repeat
+                Ok(false)
             },
         }
     }
@@ -300,23 +337,79 @@ impl IllimatState {
         // If player has more than 4 cards, they keep them (no discarding rule in Illimat)
     }
     
-    /// Handle field clearing: collect available okus and reseed if needed
-    fn handle_field_cleared(&mut self, _field: FieldId, player: PlayerId) {
-        // Collect all available okus when a field is cleared
+    /// Handle field clearing: collect available okus, handle Luminary revelation, and reseed if needed
+    fn handle_field_cleared(&mut self, field: FieldId, player: PlayerId) {
+        // Step 1: Draw cards first (already handled by advance_turn)
+        
+        // Step 2: Collect available okus
         let available_okus = OkusManager::get_available_okus(&self.okus_positions);
+        let had_available_okus = !available_okus.is_empty();
         
         if !available_okus.is_empty() {
             // Collect all available okus for the player who cleared the field
             for &okus in &available_okus {
                 self.okus_positions[okus as usize] = OkusPosition::WithPlayer(player);
             }
-            
-            // Note: Console display should show okus collection, but we don't handle
-            // console output in the core game logic
         }
         
-        // TODO: Implement field reseeding with 3 cards per the rules
-        // This would require careful handling to avoid infinite loops if deck is empty
+        // Step 3: Handle Luminary revelation (face-down -> face-up)
+        let mut revealed_luminary = false;
+        let revealed_luminary_card = if let LuminaryState::FaceDown(luminary) = self.field_luminaries[field.0 as usize] {
+            self.field_luminaries[field.0 as usize] = LuminaryState::FaceUp(luminary);
+            revealed_luminary = true;
+            Some(luminary)
+        } else {
+            None
+        };
+        
+        // Handle Luminary revelation effects if needed
+        if let Some(luminary) = revealed_luminary_card {
+            // Apply specific Luminary revelation effects directly
+            match luminary {
+                LuminaryCard::TheRiver => {
+                    // River deals 6 cards to its field when revealed
+                    for _ in 0..6 {
+                        if let Some(card) = self.deck.pop() {
+                            self.field_cards[field.0 as usize].push(card);
+                        } else {
+                            break; // Deck exhausted
+                        }
+                    }
+                }
+                _ => {
+                    // Other Luminaries don't have revelation effects that modify game state
+                }
+            }
+        }
+        
+        // Step 4: Handle Luminary claiming (face-up -> claimed)
+        let claiming_luminary_card = if let LuminaryState::FaceUp(luminary) = self.field_luminaries[field.0 as usize] {
+            self.field_luminaries[field.0 as usize] = LuminaryState::Claimed(luminary, player);
+            Some(luminary)
+        } else {
+            None
+        };
+        
+        // Handle Luminary claiming effects if needed
+        if let Some(_luminary) = claiming_luminary_card {
+            // Most claiming effects are passive (e.g., scoring bonuses)
+            // and don't require immediate game state changes
+        }
+        
+        // Step 5: Reseed field with 3 cards if conditions are met
+        let should_reseed = revealed_luminary || had_available_okus;
+        
+        if should_reseed && self.deck.len() >= 3 {
+            // Reseed the field with 3 cards
+            for _ in 0..3 {
+                if let Some(card) = self.deck.pop() {
+                    self.field_cards[field.0 as usize].push(card);
+                } else {
+                    break; // Deck exhausted
+                }
+            }
+        }
+        // If fewer than 3 cards remain in deck, do not reseed (field remains fallow)
     }
     
     fn create_deck(use_stars_suit: bool) -> Vec<Card> {
@@ -347,39 +440,257 @@ impl IllimatState {
 
 impl fmt::Display for IllimatState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "=== ILLIMAT - Round {}, Turn {} ===", 
-                 self.round_number, self.turn_number)?;
-        writeln!(f, "Illimat Orientation: {} (Spring at Field {})", 
-                 self.illimat_orientation, self.illimat_orientation)?;
-        
-        // Fields
-        for field_id in 0..4 {
-            let field = FieldId(field_id);
-            let field_display = DisplayManager::format_field(
-                field,
-                &self.field_cards[field_id as usize],
-                &self.field_stockpiles[field_id as usize],
-                self.field_seasons[field_id as usize],
-                self.illimat_orientation
-            );
-            writeln!(f, "{}", field_display)?;
-        }
-        
-        // Current player's hand
-        writeln!(f, "YOUR HAND: {}", 
-                 DisplayManager::format_hand_with_numbers(&self.player_hands[self.current_player.0 as usize]))?;
-        
-        // Scores
-        write!(f, "SCORES: ")?;
-        for player_id in 0..self.config.player_count {
-            write!(f, "P{}: {} ", player_id, self.total_scores[player_id as usize])?;
-        }
+        // Enhanced header with ASCII art
+        writeln!(f, "┌─────────────────────────────────────────────────────────────┐")?;
+        writeln!(f, "│                    🎴  I L L I M A T  🎴                    │")?;
+        writeln!(f, "├─────────────────────────────────────────────────────────────┤")?;
+        writeln!(f, "│ Round: {:2} │ Turn: {:3} │ Player: {} │ Orientation: {:>8} │", 
+                 self.round_number, self.turn_number, self.current_player.0,
+                 format!("Spring@{}", self.illimat_orientation))?;
+        writeln!(f, "└─────────────────────────────────────────────────────────────┘")?;
         writeln!(f)?;
         
-        // Okus status
-        writeln!(f, "OKUS: {}", DisplayManager::format_okus_status(&self.okus_positions))?;
+        // Enhanced field display with visual hierarchy
+        self.display_enhanced_fields(f)?;
+        writeln!(f)?;
+        
+        // Current player's hand with enhanced formatting
+        self.display_enhanced_hand(f)?;
+        writeln!(f)?;
+        
+        // Enhanced scores display
+        self.display_enhanced_scores(f)?;
+        writeln!(f)?;
+        
+        // Enhanced okus status
+        self.display_enhanced_okus(f)?;
         
         Ok(())
+    }
+}
+
+impl IllimatState {
+    /// Display fields with enhanced ASCII layout
+    fn display_enhanced_fields(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "┌─────────────────────────────────────────────────────────────┐")?;
+        writeln!(f, "│                     🌟  F I E L D S  🌟                     │")?;
+        writeln!(f, "├─────────────────────────────────────────────────────────────┤")?;
+        
+        for field_id in 0..4 {
+            let field = FieldId(field_id);
+            let season = self.field_seasons[field_id as usize];
+            let cards = &self.field_cards[field_id as usize];
+            let stockpiles = &self.field_stockpiles[field_id as usize];
+            
+            // Field header with season emoji and name
+            let season_emoji = self.get_season_emoji(season);
+            let field_name = field.seasonal_name(self.illimat_orientation);
+            let season_name = format!("{:?}", season);
+            
+            write!(f, "│ {} {} Field ({:<6})", season_emoji, field_name, season_name)?;
+            
+            // Show restrictions
+            let restrictions = self.get_season_restrictions_display(field, season);
+            writeln!(f, "{:>30} │", restrictions)?;
+            
+            // Field contents
+            if cards.is_empty() && stockpiles.is_empty() {
+                writeln!(f, "│   └── Empty field                                          │")?;
+            } else {
+                // Loose cards
+                if !cards.is_empty() {
+                    write!(f, "│   ├── Loose Cards: ")?;
+                    let cards_display = self.format_enhanced_cards(cards);
+                    writeln!(f, "{:<32} │", cards_display)?;
+                }
+                
+                // Stockpiles
+                if !stockpiles.is_empty() {
+                    write!(f, "│   └── Stockpiles: ")?;
+                    let stockpiles_display = self.format_enhanced_stockpiles(stockpiles);
+                    writeln!(f, "{:<33} │", stockpiles_display)?;
+                } else if !cards.is_empty() {
+                    writeln!(f, "│   └── No stockpiles                                        │")?;
+                }
+            }
+            
+            if field_id < 3 {
+                writeln!(f, "├─────────────────────────────────────────────────────────────┤")?;
+            }
+        }
+        
+        writeln!(f, "└─────────────────────────────────────────────────────────────┘")?;
+        Ok(())
+    }
+    
+    /// Display player's hand with enhanced formatting
+    fn display_enhanced_hand(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hand = &self.player_hands[self.current_player.0 as usize];
+        
+        writeln!(f, "┌─────────────────────────────────────────────────────────────┐")?;
+        writeln!(f, "│                    👋  Y O U R   H A N D  👋                │")?;
+        writeln!(f, "├─────────────────────────────────────────────────────────────┤")?;
+        
+        if hand.is_empty() {
+            writeln!(f, "│                     No cards remaining                      │")?;
+        } else {
+            // Group cards by chunks of 8 for readability
+            for (chunk_idx, chunk) in hand.chunks(8).enumerate() {
+                write!(f, "│ ")?;
+                for (i, card) in chunk.iter().enumerate() {
+                    let card_num = chunk_idx * 8 + i + 1;
+                    let card_display = format!("{}:{}", card_num, self.format_card_with_suit_symbol(*card));
+                    write!(f, "{:<8}", card_display)?;
+                }
+                // Pad the rest of the line
+                let remaining = 8 - chunk.len();
+                for _ in 0..remaining {
+                    write!(f, "        ")?;
+                }
+                writeln!(f, " │")?;
+            }
+        }
+        
+        writeln!(f, "└─────────────────────────────────────────────────────────────┘")?;
+        Ok(())
+    }
+    
+    /// Display scores with enhanced formatting
+    fn display_enhanced_scores(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "┌─────────────────────────────────────────────────────────────┐")?;
+        writeln!(f, "│                     🏆  S C O R E S  🏆                     │")?;
+        writeln!(f, "├─────────────────────────────────────────────────────────────┤")?;
+        
+        let mut scores_line = String::from("│ ");
+        for player_id in 0..self.config.player_count {
+            let score = self.total_scores[player_id as usize];
+            let current_marker = if PlayerId(player_id) == self.current_player { "◀" } else { " " };
+            let player_display = format!("Player {}: {:2} {}", player_id, score, current_marker);
+            scores_line.push_str(&format!("{:<14}", player_display));
+        }
+        // Pad to full width
+        while scores_line.len() < 63 {
+            scores_line.push(' ');
+        }
+        scores_line.push_str(" │");
+        writeln!(f, "{}", scores_line)?;
+        
+        writeln!(f, "└─────────────────────────────────────────────────────────────┘")?;
+        Ok(())
+    }
+    
+    /// Display okus tokens with enhanced formatting
+    fn display_enhanced_okus(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "┌─────────────────────────────────────────────────────────────┐")?;
+        writeln!(f, "│                     🎯  O K U S  🎯                         │")?;
+        writeln!(f, "├─────────────────────────────────────────────────────────────┤")?;
+        
+        let okus_ids = [crate::game::okus::OkusId::A, crate::game::okus::OkusId::B, 
+                       crate::game::okus::OkusId::C, crate::game::okus::OkusId::D];
+        
+        let mut okus_line = String::from("│ ");
+        for (i, okus_id) in okus_ids.iter().enumerate() {
+            let position = &self.okus_positions[i];
+            let status = match position {
+                crate::game::okus::OkusPosition::OnIllimat => "Illimat".to_string(),
+                crate::game::okus::OkusPosition::WithPlayer(player) => format!("P{}", player.0),
+            };
+            let okus_display = format!("{}:{:<8}", okus_id, status);
+            okus_line.push_str(&format!("{:<12}", okus_display));
+        }
+        // Pad to full width
+        while okus_line.len() < 63 {
+            okus_line.push(' ');
+        }
+        okus_line.push_str(" │");
+        writeln!(f, "{}", okus_line)?;
+        
+        writeln!(f, "└─────────────────────────────────────────────────────────────┘")?;
+        Ok(())
+    }
+    
+    /// Get season emoji for enhanced display
+    fn get_season_emoji(&self, season: Season) -> &'static str {
+        match season {
+            Season::Spring => "🌸",
+            Season::Summer => "☀️",
+            Season::Autumn => "🍂",
+            Season::Winter => "❄️",
+        }
+    }
+    
+    /// Get season restrictions display
+    fn get_season_restrictions_display(&self, field: FieldId, _season: Season) -> String {
+        let can_sow = crate::game::capabilities::CapabilityManager::can_sow_basic(field, self.illimat_orientation);
+        let can_harvest = crate::game::capabilities::CapabilityManager::can_harvest_basic(field, self.illimat_orientation);
+        let can_stockpile = crate::game::capabilities::CapabilityManager::can_stockpile_basic(field, self.illimat_orientation);
+        
+        let mut actions = Vec::new();
+        if can_sow { actions.push("S"); }
+        if can_harvest { actions.push("H"); }
+        if can_stockpile { actions.push("T"); }
+        
+        if actions.is_empty() {
+            "No actions".to_string()
+        } else {
+            format!("Can: {}", actions.join("/"))
+        }
+    }
+    
+    /// Format cards with enhanced Unicode suit symbols
+    fn format_enhanced_cards(&self, cards: &[Card]) -> String {
+        if cards.is_empty() {
+            return "None".to_string();
+        }
+        
+        cards.iter()
+            .map(|card| self.format_card_with_suit_symbol(*card))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    
+    /// Format single card with Unicode suit symbol
+    fn format_card_with_suit_symbol(&self, card: Card) -> String {
+        let rank = match card.rank() {
+            crate::game::card::Rank::Fool => "F",
+            crate::game::card::Rank::Two => "2",
+            crate::game::card::Rank::Three => "3",
+            crate::game::card::Rank::Four => "4",
+            crate::game::card::Rank::Five => "5",
+            crate::game::card::Rank::Six => "6",
+            crate::game::card::Rank::Seven => "7",
+            crate::game::card::Rank::Eight => "8",
+            crate::game::card::Rank::Nine => "9",
+            crate::game::card::Rank::Ten => "T",
+            crate::game::card::Rank::Knight => "N",
+            crate::game::card::Rank::Queen => "Q",
+            crate::game::card::Rank::King => "K",
+        };
+        
+        let suit_symbol = match card.suit() {
+            crate::game::card::Suit::Spring => "♠",  // Spade-like for Spring
+            crate::game::card::Suit::Summer => "♦",  // Diamond for Summer
+            crate::game::card::Suit::Autumn => "♣",  // Club for Autumn
+            crate::game::card::Suit::Winter => "♥",  // Heart for Winter
+            crate::game::card::Suit::Stars => "✦",   // Star for Stars
+        };
+        
+        format!("{}{}", rank, suit_symbol)
+    }
+    
+    /// Format stockpiles with enhanced display
+    fn format_enhanced_stockpiles(&self, stockpiles: &[Stockpile]) -> String {
+        if stockpiles.is_empty() {
+            return "None".to_string();
+        }
+        
+        stockpiles.iter()
+            .map(|stockpile| {
+                let cards = self.format_enhanced_cards(&stockpile.cards);
+                format!("{}[{}]", stockpile.value, cards)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -610,8 +921,8 @@ mod tests {
         }
         
         #[cfg(test)]
-        fn new_test_game() -> Self {
-            let config = GameConfig::new(2);
+        pub fn new_test_game() -> Self {
+            let config = GameConfig::new(2).beginner_mode(); // Use beginner mode for simpler testing
             IllimatState::new(config)
         }
     }

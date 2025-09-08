@@ -12,7 +12,7 @@ The goal of Illimat is to be the first player to earn **17 or more points**. Poi
 - Four metal okus tokens  
 - Four scoring tokens  
 - A deck of 65 cards, divided into five suits:  
-  Spring (🜁), Summer (☼), Autumn (🍂), Winter (❄️), and Stars (✶)  
+  Spring (Sp), Summer (Su), Autumn (Au), Winter (Wi), and Stars (St)
   Each suit has 13 cards, numbered 1–14.  
   Fools are worth **1 or 14**, decided by the active player  
 - Eight Luminary cards (no suit or number)  

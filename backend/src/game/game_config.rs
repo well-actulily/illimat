@@ -1,4 +1,5 @@
 use crate::game::player::PlayerType;
+use crate::game::luminary::LuminaryConfiguration;
 
 /// Game configuration
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -6,6 +7,7 @@ pub struct GameConfig {
     pub player_count: u8,
     pub player_types: [PlayerType; 4],  // Human/Computer for each slot
     pub use_stars_suit: bool,             // true = 65 cards, false = 52 cards
+    pub luminary_config: LuminaryConfiguration, // Which Luminaries to include
 }
 
 impl GameConfig {
@@ -15,7 +17,7 @@ impl GameConfig {
             panic!("Player count must be between 2 and 4");
         }
         
-        let mut player_types = [PlayerType::Computer; 4];
+        let mut player_types = [PlayerType::SimpleCpu; 4];
         for i in 0..player_count as usize {
             player_types[i] = PlayerType::Human;
         }
@@ -24,6 +26,7 @@ impl GameConfig {
             player_count,
             player_types,
             use_stars_suit: true, // Default to full deck (including Stars)
+            luminary_config: LuminaryConfiguration::core_only(), // Default to core Luminaries
         }
     }
     
@@ -33,10 +36,22 @@ impl GameConfig {
         self
     }
     
+    /// Set the Luminary configuration
+    pub fn with_luminaries(mut self, luminary_config: LuminaryConfiguration) -> Self {
+        self.luminary_config = luminary_config;
+        self
+    }
+    
+    /// Enable beginner mode (no Luminaries)
+    pub fn beginner_mode(mut self) -> Self {
+        self.luminary_config = LuminaryConfiguration::none();
+        self
+    }
+    
     /// Set a specific player as computer-controlled
     pub fn with_computer_player(mut self, player_id: u8) -> Self {
         if (player_id as usize) < self.player_count as usize {
-            self.player_types[player_id as usize] = PlayerType::Computer;
+            self.player_types[player_id as usize] = PlayerType::MctsCpu;
         }
         self
     }
@@ -53,7 +68,7 @@ impl GameConfig {
     pub fn computer_player_count(&self) -> u8 {
         self.player_types[..self.player_count as usize]
             .iter()
-            .filter(|&&player_type| player_type == PlayerType::Computer)
+            .filter(|&&player_type| player_type != PlayerType::Human)
             .count() as u8
     }
     

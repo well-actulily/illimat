@@ -7,15 +7,17 @@ edition = "2021"
 rand = { version = "0.8", features = ["small_rng"] }
 arrayvec = "0.7"
 colored = "2.0"
+crossterm = "0.27"
 serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1.0"
 wasm-bindgen = "0.2"
-web-sys = "0.3"
+web-sys = { version = "0.3", features = ["console", "Performance", "Window"] }
 js-sys = "0.3"
 wee_alloc = { version = "0.4", optional = true }
 getrandom = { version = "0.2", features = ["js"] }
 console_error_panic_hook = { version = "0.1", optional = true }
+fastrand = "2.0"
 
 [dev-dependencies]
 proptest = "1.0"
@@ -45,3 +47,7 @@ harness = false
 default = []
 wee_alloc = ["dep:wee_alloc"]
 console_error_panic_hook = ["dep:console_error_panic_hook"]
+wasm-safe = []  # Simplified WASM-safe MCTS implementation
+debug-selection = []  # Enable only MCTS selection phase
+debug-expansion = []  # Enable selection + expansion phases
+debug-simulation = []  # Enable selection + expansion + simulation phases

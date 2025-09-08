@@ -69,6 +69,26 @@ pub enum Action {
     Sow { field: FieldId, card: Card },
     Harvest { field: FieldId, card: Card, targets: Vec<Card> },
     Stockpile { field: FieldId, card: Card, targets: Vec<Card> },
+    
+    // Luminary-specific actions
+    ChangelingExchange { 
+        field: FieldId, 
+        hand_card: Card, 
+        field_card: Card 
+    },
+    RakeSow { 
+        field: FieldId, 
+        card: Card 
+    },
+    LoomStockpile { 
+        field: FieldId, 
+        card: Card, 
+        targets: Vec<Card> 
+    },
+    EchoRepeat { 
+        original_action: Box<Action>, 
+        repeat_field: FieldId 
+    },
 }
 
 /// Action application utilities
@@ -86,8 +106,8 @@ impl ActionManager {
         field: FieldId,
         card: Card,
     ) -> Result<(), ActionError> {
-        // Check if sowing is allowed in this field
-        if !CapabilityManager::can_sow(field, *illimat_orientation) {
+        // Check if sowing is allowed in this field (using basic check for now)
+        if !CapabilityManager::can_sow_basic(field, *illimat_orientation) {
             let current_season = field_seasons[field.0 as usize];
             let suggestion = match current_season {
                 Season::Autumn => "Try harvesting or stockpiling instead. Sowing resumes in Winter.".to_string(),
@@ -180,8 +200,8 @@ impl ActionManager {
         card: Card,
         targets: &[Card],
     ) -> Result<(), ActionError> {
-        // Check if harvesting is allowed in this field
-        if !CapabilityManager::can_harvest(field, illimat_orientation) {
+        // Check if harvesting is allowed in this field (using basic check for now)
+        if !CapabilityManager::can_harvest_basic(field, illimat_orientation) {
             let current_season = field_seasons[field.0 as usize];
             let suggestion = match current_season {
                 Season::Winter => "Try sowing or stockpiling instead. Harvesting resumes in Spring.".to_string(),
@@ -353,8 +373,8 @@ impl ActionManager {
         card: Card,
         targets: Vec<Card>,
     ) -> Result<(), ActionError> {
-        // Check if stockpiling is allowed in this field
-        if !CapabilityManager::can_stockpile(field, *illimat_orientation) {
+        // Check if stockpiling is allowed in this field (using basic check for now)
+        if !CapabilityManager::can_stockpile_basic(field, *illimat_orientation) {
             let current_season = field_seasons[field.0 as usize];
             let suggestion = match current_season {
                 Season::Spring => "Try sowing or harvesting instead. Stockpiling resumes in Summer.".to_string(),
