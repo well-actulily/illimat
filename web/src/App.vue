@@ -1,39 +1,14 @@
 <script setup>
-import { ref } from 'vue'
 import IllimatScene from './components/IllimatScene.vue'
-
-const cameraRotation = ref(0)
-const deviceRotation = ref(45)
 </script>
 
 <template>
   <div id="app">
     <div class="game-container">
       <div class="game-scene">
-        <IllimatScene :camera-rotation="cameraRotation" :device-rotation="deviceRotation" />
+        <IllimatScene />
       </div>
       <div class="game-ui">
-        <h1>Illimat Game</h1>
-        <div class="controls">
-          <label for="camera-slider">Camera Rotation: {{ cameraRotation }}°</label>
-          <input 
-            id="camera-slider"
-            type="range" 
-            min="0" 
-            max="360" 
-            step="1"
-            v-model.number="cameraRotation"
-          />
-          <label for="device-slider">Device Rotation: {{ deviceRotation }}°</label>
-          <input 
-            id="device-slider"
-            type="range" 
-            min="0" 
-            max="360" 
-            step="1"
-            v-model.number="deviceRotation"
-          />
-        </div>
       </div>
     </div>
   </div>

@@ -1,18 +1,9 @@
 <script setup>
+import { ref } from 'vue'
 import GameMat from './GameMat.vue'
-import GameField from './GameField.vue'
-import IllimatDevice from './IllimatDevice.vue'
 
-const props = defineProps({
-  cameraRotation: {
-    type: Number,
-    default: 0
-  },
-  deviceRotation: {
-    type: Number,
-    default: 0
-  }
-})
+// Internal camera state
+const cameraRotation = ref(0)
 
 // Center point for rotation
 const centerX = 260
@@ -30,7 +21,7 @@ const isometricScale = 0.894427
   >
     <g :transform="`scale(1 ${isometricScale})`">
       <g :transform="`rotate(${cameraRotation} ${centerX} ${centerY})`">
-        <GameMat :camera-rotation="cameraRotation" :device-rotation="deviceRotation" />
+        <GameMat :camera-rotation="cameraRotation" @update:cameraRotation="cameraRotation = $event" />
       </g>
     </g>
   </svg>

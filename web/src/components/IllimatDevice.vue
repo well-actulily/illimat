@@ -1,40 +1,122 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   cameraRotation: {
     type: Number,
     default: 0
-  },
-  deviceRotation: {
-    type: Number,
-    default: 0
   }
 })
 
-// Device depth configuration
-const deviceHeight = 30
+const deviceRotation = ref(45)
+const currentLift = ref(0)
+const animating = ref(false)
 
-// Calculate offset to keep device from center in screen space
+const nextSeason = () => {
+  if (animating.value) return
+  
+  const currentAngle = deviceRotation.value
+  // Season positions: 45, 135, 225, 315
+  const nextAngle = (Math.round((currentAngle - 45) / 90) * 90 + 45 + 90) % 360
+  animateTo(nextAngle)
+}
+
+const animateTo = (nextDeviceAngle) => {
+  if (animating.value) return
+  animating.value = true
+
+  const start = performance.now()
+  const liftDuration = 160
+  const rotateDuration = 280
+  const dropDuration = 120
+  const settleDuration = 200
+  const total = liftDuration + rotateDuration + dropDuration + settleDuration
+  
+  const angleStart = deviceRotation.value
+  const angleEnd = nextDeviceAngle % 360
+  const angleDelta = (angleEnd - angleStart + 360) % 360
+
+  const frame = (t) => {
+    const elapsed = t - start
+    let angle = angleStart
+    let lift = 0
+
+    if (elapsed < liftDuration) {
+      // Lift phase - reluctant upward movement
+      const p = elapsed / liftDuration
+      const reluctant = 1 - Math.pow(1 - p, 4)
+      lift = -35 * reluctant
+    } else if (elapsed < liftDuration + rotateDuration) {
+      // Rotate phase - heavy rotation while lifted
+      const p = (elapsed - liftDuration) / rotateDuration
+      const heavy = p < 0.3 ? 2 * p * p : 1 - 0.5 * Math.pow(-2 * p + 2, 2)
+      angle = angleStart + angleDelta * heavy
+      lift = -35
+    } else if (elapsed < liftDuration + rotateDuration + dropDuration) {
+      // Drop phase - gravity-based fall
+      const p = (elapsed - liftDuration - rotateDuration) / dropDuration
+      const gravity = p * p * p * p
+      lift = -35 + (35 * gravity)
+      angle = angleEnd
+    } else if (elapsed < total) {
+      // Settle phase - bounce and settle
+      const settleTime = elapsed - liftDuration - rotateDuration - dropDuration
+      const p = settleTime / settleDuration
+      if (p < 0.3) {
+        const bounceP = p / 0.3
+        lift = Math.sin(bounceP * Math.PI) * 4 * (1 - bounceP)
+      } else {
+        lift = 0
+      }
+      angle = angleEnd
+    } else {
+      // Animation complete
+      deviceRotation.value = angleEnd
+      currentLift.value = 0
+      animating.value = false
+      return
+    }
+
+    deviceRotation.value = angle
+    currentLift.value = lift
+    requestAnimationFrame(frame)
+  }
+  
+  requestAnimationFrame(frame)
+}
+
+const handleClick = () => {
+  nextSeason()
+}
+
+const deviceHeight = 30
 const radius = 34
 
 const translateX = computed(() => {
   const radians = (props.cameraRotation * Math.PI) / 180
   const offsetX = -radius * Math.sin(radians)
-  return 260 + offsetX - 65
+  
+  // Apply lift using same transformation as screen-down offset
+  const liftOffset = getScreenDownOffset(currentLift.value)
+  
+  return 260 + offsetX - 65 + liftOffset.x
 })
 
 const translateY = computed(() => {
   const radians = (props.cameraRotation * Math.PI) / 180
   const offsetY = -radius * Math.cos(radians)
-  return 260 + offsetY - 65
+  
+  // Apply lift using same transformation as screen-down offset  
+  const liftOffset = getScreenDownOffset(currentLift.value)
+  
+  return 260 + offsetY - 65 + liftOffset.y
 })
 
 // Define the four corners of the 130x130 Illimat device
-const cornerSW = computed(() => (rotatePoint({ x: 0, y: 130 }, props.deviceRotation)))
-const cornerNW = computed(() => (rotatePoint({ x: 0, y: 0 }, props.deviceRotation)))
-const cornerNE = computed(() => (rotatePoint({ x: 130, y: 0 }, props.deviceRotation)))
-const cornerSE = computed(() => (rotatePoint({ x: 130, y: 130 }, props.deviceRotation)))
+const cornerSW = computed(() => (rotatePoint({ x: 0, y: 130 }, deviceRotation.value)))
+const cornerNW = computed(() => (rotatePoint({ x: 0, y: 0 }, deviceRotation.value)))
+const cornerNE = computed(() => (rotatePoint({ x: 130, y: 0 }, deviceRotation.value)))
+const cornerSE = computed(() => (rotatePoint({ x: 130, y: 130 }, deviceRotation.value)))
 
 // Helper function to rotate a point around center (65, 65)
 const rotatePoint = (point, angle) => {
@@ -55,7 +137,7 @@ const rotatePoint = (point, angle) => {
 
 // Helper to calculate normalized combined rotation
 const getCombinedRotation = () => {
-  const rawRotation = props.cameraRotation + props.deviceRotation
+  const rawRotation = props.cameraRotation + deviceRotation.value
   return ((rawRotation % 360) + 360) % 360
 }
 
@@ -147,26 +229,16 @@ const getSideQuadrilateral = (sideOffset) => {
 const leftSidePoints = computed(() => getSideQuadrilateral(0))
 const rightSidePoints = computed(() => getSideQuadrilateral(1))
 
-// Helper to format points array as SVG polygon points string
-const formatPoints = (points) => {
-  return points.map(p => `${p.x},${p.y}`).join(' ')
-}
-
 // Calculate affine transformation matrix from rectangle to parallelogram
 const calculateTransformMatrix = (quadPoints) => {
-  const [P0, P1, P2, P3] = quadPoints
+  const [P0, P1, _, P3] = quadPoints
   
   // Calculate the actual parallelogram dimensions
   const dx1 = P1.x - P0.x  // Right edge vector
   const dy1 = P1.y - P0.y
   const dx2 = P3.x - P0.x  // Up edge vector  
   const dy2 = P3.y - P0.y
-  
-  // Calculate actual edge lengths
-  const rightEdgeLength = Math.sqrt(dx1*dx1 + dy1*dy1)
-  const upEdgeLength = Math.sqrt(dx2*dx2 + dy2*dy2)
-  
-  // Use the symbol's actual dimensions (130 × 34) instead of parallelogram dimensions
+
   const symbolWidth = 130
   const symbolHeight = 34
   
@@ -176,16 +248,6 @@ const calculateTransformMatrix = (quadPoints) => {
   const d = dy2 / symbolHeight
   const e = P0.x
   const f = P0.y
-  
-  // Debug
-  if (Math.random() < 0.02) {
-    console.log('Matrix calc:', {
-      rightEdgeLength: rightEdgeLength.toFixed(1),
-      upEdgeLength: upEdgeLength.toFixed(1), 
-      symbolWidth, symbolHeight,
-      matrix: {a: a.toFixed(3), b: b.toFixed(3), c: c.toFixed(3), d: d.toFixed(3)}
-    })
-  }
   
   return `matrix(${a} ${b} ${c} ${d} ${e} ${f})`
 }
@@ -201,7 +263,7 @@ const rightSideTransform = computed(() => {
 </script>
 
 <template>
-  <g id="illimat" :transform="`translate(${translateX} ${translateY})`">
+  <g id="illimat" :transform="`translate(${translateX} ${translateY})`" @click="handleClick" style="cursor: pointer;">
     <defs>
       <symbol id="illimat-hatching">
         <polyline points="2 77 28.589 59.153 28.589 62.153 2 80 2 83 28.589 65.153 28.589 68.153 2 86 2 89 28.589 71.153 28.589 74.153 2 92 2 95 28.589 77.153 28.589 80.153 2 98 2 101 28.589 83.153 28.589 86.153 2 104 2 107" class="blk-stroke fine-stroke"/>
@@ -226,22 +288,46 @@ const rightSideTransform = computed(() => {
       <symbol id="season-circle">
         <circle cx="7" cy="65" r="6" class="wht-fill"/>
       </symbol>
-      <symbol id="side-corner-hash">
-        <polyline points=".25 17 15.667 .25 12.583 .25 .25 13.65 .25 10.3 9.5 .25 6.417 .25 .25 6.95 .25 3.6 3.333 .25" class="wht-stroke fine-stroke"/>
+      <symbol id="side-hatching">
+        <polyline points="2.25 17 17.25 2 14.25 2 2.25 14 2.25 11 11.25 2 8.25 2 2.25 8 2.25 5 5.25 2" class="wht-stroke fine-stroke"/>
       </symbol>
       <symbol id="side-face" viewBox="0 0 130 34" width="130" height="34">
         <rect id="outer-rect" x="0" y="0" width="130" height="34" class="blk-fill"/>
-        <rect id="inner-rect" x=".25" y=".25" width="129.5" height="33.5" class="wht-stroke fine-stroke"/>
-        <use href="#side-corner-hash" />
-        <use href="#side-corner-hash" transform="rotate(90 65 17)" />
-        <use href="#side-corner-hash" transform="rotate(180 65 17)" />
-        <use href="#side-corner-hash" transform="rotate(270 65 17)" />
-        <use href="#side-corner-hash" transform="scale(-1 1) translate(-130 0) rotate(0 65 17)" />
-        <use href="#side-corner-hash" transform="scale(-1 1) translate(-130 0) rotate(90 65 17)" />
-        <use href="#side-corner-hash" transform="scale(-1 1) translate(-130 0) rotate(180 65 17)" />
-        <use href="#side-corner-hash" transform="scale(-1 1) translate(-130 0) rotate(270 65 17)" />
+        <rect id="inner-rect" x="2" y="2" width="126" height="30" class="wht-stroke fine-stroke"/>
+        <use href="#side-hatching" />
+        <use href="#side-hatching" transform="rotate(180 65 17)" />
+        <use href="#side-hatching" transform="scale(-1 1) translate(-130 0) rotate(0 65 17)" />
+        <use href="#side-hatching" transform="scale(-1 1) translate(-130 0) rotate(180 65 17)" />
       </symbol>
     </defs>
+    <use 
+      href="#side-face"
+      :transform="leftSideTransform"
+    />
+    <use 
+      href="#side-face"
+      :transform="rightSideTransform"
+    />
+    
+    <!-- Edge highlight lines -->
+    <line 
+      :x1="leftSidePoints[0].x" 
+      :y1="leftSidePoints[0].y" 
+      :x2="leftSidePoints[3].x" 
+      :y2="leftSidePoints[3].y" 
+      class="wht-stroke"
+      stroke-width="1"
+    />
+    
+    <line 
+      :x1="rightSidePoints[1].x" 
+      :y1="rightSidePoints[1].y" 
+      :x2="rightSidePoints[2].x" 
+      :y2="rightSidePoints[2].y" 
+      class="wht-stroke"
+      stroke-width="1"
+    />
+    
     <g id="top" :transform="`rotate(${deviceRotation} 65 65)`">
       <rect id="outer-rectangle" x="0" y="0" width="130" height="130" transform="translate(0 130) rotate(-90)" class="wht-fill"/>
       <rect id="inner-rectangle" x="2" y="2" width="126" height="126" transform="translate(0 130) rotate(-90)" class="blk-stroke fine-stroke"/>
@@ -257,29 +343,5 @@ const rightSideTransform = computed(() => {
       <use href="#season-circle" transform="rotate(180 65 65)" />
       <use href="#season-circle" transform="rotate(270 65 65)" />
     </g>
-    
-    <!-- 3D Side Faces -->
-    <use 
-      href="#side-face"
-      :transform="leftSideTransform"
-    />
-    
-    <use 
-      href="#side-face"
-      :transform="rightSideTransform"
-    />
-    
-    <!-- Debug: Show polygons to compare -->
-    <!-- <polygon 
-      :points="formatPoints(leftSidePoints)"
-      fill="cyan" 
-      opacity="0.3"
-    />
-    
-    <polygon 
-      :points="formatPoints(rightSidePoints)"
-      fill="magenta" 
-      opacity="0.3"
-    /> -->
   </g>
 </template>
