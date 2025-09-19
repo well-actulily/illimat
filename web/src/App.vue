@@ -40,33 +40,18 @@ import IllimatScene from './components/IllimatScene.vue'
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: clamp(0.75rem, 2vmin, 2rem);
   background: #181a1b;
 }
 
 .game-ui {
   flex: 1;
-  padding: 20px;
+  padding: clamp(0.75rem, 2vmin, 2rem);
   overflow-y: auto;
 }
 
-.controls {
-  margin: 20px 0;
-}
-
-.controls label {
-  display: block;
-  margin-bottom: 10px;
-  font-weight: bold;
-}
-
-.controls input[type="range"] {
-  width: 100%;
-  margin-bottom: 10px;
-}
-
-svg {
-  height: calc(100vh - 40px);
+#scene {
+  height: calc(100vh - 2 * clamp(0.75rem, 2vmin, 2rem));
   width: auto;
   max-width: none;
 }

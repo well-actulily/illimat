@@ -181,7 +181,6 @@ const getScreenDownOffset = (depthPixels) => {
   }
 }
 
-// Lower points - 34px below each corner in screen space (undoing all rotations but keeping scaling)
 const cornerSWL = computed(() => {
   const offset = getScreenDownOffset(deviceHeight)
   return { x: cornerSW.value.x + offset.x, y: cornerSW.value.y + offset.y }
