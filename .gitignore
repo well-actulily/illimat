@@ -135,3 +135,4 @@ flamegraph.svg
 *.gcno
 .benchmarks/
 benchmark-results/
+.superpowers/

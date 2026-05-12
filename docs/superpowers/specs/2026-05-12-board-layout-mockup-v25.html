@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Hand pivot — v15 (wrap on overflow)</title>
+<style>
+  body {
+    background: #0e1814;
+    color: #cde4d4;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 20px;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 4px; }
+  .subtitle { color: #95b5a3; font-size: 0.9rem; margin: 0 0 16px; }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px 16px;
+    background: #14201a;
+    border: 1px solid #2a4030;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .ctrl { display: flex; flex-direction: column; }
+  .ctrl label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #95b5a3;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .ctrl label .val { color: #f0e8c8; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .ctrl input[type=range] { width: 100%; accent-color: #5b9ad3; }
+  .ctrl-row { display: flex; gap: 6px; align-items: center; }
+  .ctrl-row input[type=number] {
+    width: 64px; padding: 2px 4px;
+    background: #0a1810; color: #f0e8c8;
+    border: 1px solid #2a4030; border-radius: 3px;
+    font-family: inherit; font-size: 0.85rem;
+  }
+  .viewport-wrap { background: #0a1410; border: 1px solid #2a4030; border-radius: 8px; padding: 8px; overflow: hidden; }
+  .viewport-svg { width: 100%; height: auto; display: block; }
+  .reset-btn {
+    background: #2a4030; color: #cde4d4;
+    border: 1px solid #4a7050; padding: 6px 12px;
+    border-radius: 4px; cursor: pointer;
+    font-family: inherit; font-size: 0.85rem;
+  }
+  .reset-btn:hover { background: #3a5040; }
+  .info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 12px; padding: 10px 14px;
+    background: #14201a; border: 1px solid #2a4030; border-radius: 8px;
+    font-size: 0.85rem; color: #95b5a3; font-variant-numeric: tabular-nums;
+  }
+  .info-row .computed { color: #f0e8c8; }
+</style>
+</head>
+<body>
+
+<h1>Game state controls — v25 (locked: left-justified, grow right, rightmost on top)</h1>
+<p class="subtitle">Per-player sliders for harvest, luminary, and okus counts. Opp harvest at smaller scale with vertical row overlap so 3 rows fit comfortably while still showing rank+suit.</p>
+
+<div class="controls">
+  <div class="ctrl"><label>YOU harvest <span class="val" id="harvestPVal">14</span></label><div class="ctrl-row"><input type="range" id="harvestP" min="0" max="64" value="14" step="1"/><input type="number" id="harvestPNum" value="14"/></div></div>
+  <div class="ctrl"><label>Sara harvest <span class="val" id="harvest1Val">7</span></label><div class="ctrl-row"><input type="range" id="harvest1" min="0" max="64" value="7" step="1"/><input type="number" id="harvest1Num" value="7"/></div></div>
+  <div class="ctrl"><label>Mira harvest <span class="val" id="harvest2Val">3</span></label><div class="ctrl-row"><input type="range" id="harvest2" min="0" max="64" value="3" step="1"/><input type="number" id="harvest2Num" value="3"/></div></div>
+  <div class="ctrl"><label>Eli harvest <span class="val" id="harvest3Val">5</span></label><div class="ctrl-row"><input type="range" id="harvest3" min="0" max="64" value="5" step="1"/><input type="number" id="harvest3Num" value="5"/></div></div>
+
+  <div class="ctrl"><label>YOU lum <span class="val" id="lumPVal">1</span></label><div class="ctrl-row"><input type="range" id="lumP" min="0" max="8" value="1" step="1"/><input type="number" id="lumPNum" value="1"/></div></div>
+  <div class="ctrl"><label>Sara lum <span class="val" id="lum1Val">1</span></label><div class="ctrl-row"><input type="range" id="lum1" min="0" max="8" value="1" step="1"/><input type="number" id="lum1Num" value="1"/></div></div>
+  <div class="ctrl"><label>Mira lum <span class="val" id="lum2Val">0</span></label><div class="ctrl-row"><input type="range" id="lum2" min="0" max="8" value="0" step="1"/><input type="number" id="lum2Num" value="0"/></div></div>
+  <div class="ctrl"><label>Eli lum <span class="val" id="lum3Val">0</span></label><div class="ctrl-row"><input type="range" id="lum3" min="0" max="8" value="0" step="1"/><input type="number" id="lum3Num" value="0"/></div></div>
+
+  <div class="ctrl"><label>YOU okus <span class="val" id="okusPVal">2</span></label><div class="ctrl-row"><input type="range" id="okusP" min="0" max="4" value="2" step="1"/><input type="number" id="okusPNum" value="2"/></div></div>
+  <div class="ctrl"><label>Sara okus <span class="val" id="okus1Val">1</span></label><div class="ctrl-row"><input type="range" id="okus1" min="0" max="4" value="1" step="1"/><input type="number" id="okus1Num" value="1"/></div></div>
+  <div class="ctrl"><label>Mira okus <span class="val" id="okus2Val">1</span></label><div class="ctrl-row"><input type="range" id="okus2" min="0" max="4" value="1" step="1"/><input type="number" id="okus2Num" value="1"/></div></div>
+  <div class="ctrl"><label>Eli okus <span class="val" id="okus3Val">0</span></label><div class="ctrl-row"><input type="range" id="okus3" min="0" max="4" value="0" step="1"/><input type="number" id="okus3Num" value="0"/></div></div>
+</div>
+
+<div class="viewport-wrap">
+  <svg class="viewport-svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <clipPath id="vp"><rect x="0" y="0" width="1920" height="1080"/></clipPath>
+      <clipPath id="opp1"><rect x="1205" y="270" width="715" height="135"/></clipPath>
+      <clipPath id="opp2"><rect x="1205" y="405" width="715" height="135"/></clipPath>
+      <clipPath id="opp3"><rect x="1205" y="540" width="715" height="135"/></clipPath>
+      <pattern id="cardBackPat" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="10" stroke="#5a3a75" stroke-width="1"/>
+      </pattern>
+      <radialGradient id="okusGrad" cx="0.35" cy="0.35" r="0.7">
+        <stop offset="0" stop-color="#f0d890"/>
+        <stop offset="0.5" stop-color="#b89048"/>
+        <stop offset="1" stop-color="#5a4020"/>
+      </radialGradient>
+    </defs>
+    <rect x="0" y="0" width="1920" height="1080" fill="#1a2520"/>
+    <rect x="16" y="16" width="1173" height="1048" fill="#c83828"/>
+
+    <rect x="1205" y="0" width="715" height="270" fill="#3a5a78"/>
+    <text x="1221" y="22" font-family="sans-serif" font-size="13" font-weight="700" fill="#e8f0f8" letter-spacing="0.06em">GAME STATE</text>
+    <g id="deckStack">
+      <rect x="1229" y="38" width="150" height="210" rx="8" fill="#000" opacity="0.25"/>
+      <rect x="1227" y="36" width="150" height="210" rx="8" fill="#3a2a55" stroke="#7a5a95" stroke-width="1"/>
+      <rect x="1225" y="34" width="150" height="210" rx="8" fill="#3a2a55" stroke="#7a5a95" stroke-width="1"/>
+      <rect x="1223" y="32" width="150" height="210" rx="8" fill="#3a2a55" stroke="#7a5a95" stroke-width="1"/>
+      <rect x="1221" y="30" width="150" height="210" rx="8" fill="#3a2a55" stroke="#7a5a95" stroke-width="1"/>
+      <rect x="1239" y="48" width="114" height="174" rx="5" fill="url(#cardBackPat)" stroke="#5a3a75" stroke-width="0.5"/>
+      <text x="1296" y="143" font-family="serif" font-size="14" fill="#cde4d4" text-anchor="middle" opacity="0.6">DECK</text>
+    </g>
+    <g transform="translate(1395 30)">
+      <text x="0" y="20" font-family="sans-serif" font-size="14" fill="#cde4d4">Round 2 · Eli's turn (East)</text>
+      <text x="0" y="46" font-family="sans-serif" font-size="13" fill="#a8c8d8">Active Luminaries:</text>
+      <text x="0" y="64" font-family="sans-serif" font-size="12" fill="#cde4d4">  • Maiden — Spring</text>
+      <text x="0" y="80" font-family="sans-serif" font-size="12" fill="#cde4d4">  • Drought — Summer</text>
+      <text x="0" y="96" font-family="sans-serif" font-size="12" fill="#cde4d4">  • Forest Queen — facedown</text>
+    </g>
+
+    <rect x="1205" y="270" width="715" height="135" fill="#7a5a3a"/>
+    <text x="1221" y="290" font-family="sans-serif" font-size="12" font-weight="700" fill="#f0e0c0" letter-spacing="0.05em">SARA · NORTH · 12</text>
+    <g clip-path="url(#opp1)" id="oppFan1"></g>
+    <g id="oppCollected1"></g>
+
+    <rect x="1205" y="405" width="715" height="135" fill="#3a7a6a"/>
+    <text x="1221" y="425" font-family="sans-serif" font-size="12" font-weight="700" fill="#c8f0e0" letter-spacing="0.05em">MIRA · WEST · 8</text>
+    <g clip-path="url(#opp2)" id="oppFan2"></g>
+    <g id="oppCollected2"></g>
+
+    <rect x="1205" y="540" width="715" height="135" fill="#6a3a5a" stroke="#e0a040" stroke-width="3"/>
+    <text x="1221" y="560" font-family="sans-serif" font-size="12" font-weight="700" fill="#f0c8e0" letter-spacing="0.05em">ELI · EAST · 5  ◀ active</text>
+    <g clip-path="url(#opp3)" id="oppFan3"></g>
+    <g id="oppCollected3"></g>
+
+    <rect x="1205" y="675" width="715" height="405" fill="#3a6a7a"/>
+    <g transform="translate(1221 690)">
+      <circle cx="36" cy="36" r="32" fill="#183848" stroke="#80c0d0" stroke-width="2"/>
+      <circle cx="36" cy="36" r="22" fill="#80c0d0"/>
+      <text x="84" y="28" font-family="sans-serif" font-size="14" font-weight="700" fill="#c8e0f0">YOU · SOUTH</text>
+      <text x="84" y="58" font-family="sans-serif" font-size="28" font-weight="700" fill="#f0e8c8">14</text>
+      <text x="130" y="58" font-family="sans-serif" font-size="12" fill="#80c090">+5 → 19</text>
+    </g>
+    <g id="playerCollected"></g>
+
+    <g id="hand" clip-path="url(#vp)"></g>
+    <g id="pivotMarker" clip-path="url(#vp)"></g>
+  </svg>
+</div>
+
+<div class="info-row">
+  <span>cards/row at default peek: <span class="computed" id="cprInfo">—</span></span>
+  <span>YOUR rows: <span class="computed" id="rowsPInfo">1</span></span>
+  <span>opp rows (max): <span class="computed" id="rowsOInfo">1</span></span>
+  <span>↻ tap any pile to enlarge / show counts</span>
+</div>
+
+<script>
+const ASPECT_W = 5;
+const ASPECT_H = 7;
+const SCREEN_BOTTOM = 1080;
+const PLAYER_SLOT_HEIGHT = 405;
+const OPP_SLOT_HEIGHT = 135;
+const SCALE = OPP_SLOT_HEIGHT / PLAYER_SLOT_HEIGHT;
+const RIGHT_COL_LEFT = 1205;
+const RIGHT_COL_RIGHT = 1920;
+// Uniform 8 px panel padding on all four sides for ALL panels.
+const PANEL_PAD = 8;
+const PANEL_RIGHT_PAD = PANEL_PAD;
+const PANEL_TOP_PAD = PANEL_PAD;
+const PANEL_BOTTOM_PAD = PANEL_PAD;
+const OPP_LEFT_PAD = PANEL_PAD;
+const RIGHT_ANCHOR = RIGHT_COL_RIGHT - PANEL_RIGHT_PAD;
+const ONE_THIRD_BOUNDARY = RIGHT_COL_LEFT + Math.round((RIGHT_COL_RIGHT - RIGHT_COL_LEFT) / 3); // 1443
+const COLLECTED_LEFT_LIMIT = ONE_THIRD_BOUNDARY + PANEL_PAD;
+const OPP_SLOT_BOTTOMS = [405, 540, 675];
+
+// HARVEST cards are the same size for both player and opp.
+const HARVEST_W = 50, HARVEST_H = 70, HARVEST_PEEK = 12;
+
+// LUMINARY cards same size for both (55:95 per 11:19 ratio)
+const LUMINARY_W = 55, LUMINARY_H = 95;
+const LUM_STACK_PEEK = 3; // peek tightened so 8 luminaries fit in opp slot with 8 px top+bottom pad
+
+// OKUS column same size for both (4 chips, total height matches luminary height)
+const OKUS_R = 10, OKUS_GAP = 5; // 4*20 + 3*5 = 95 ✓
+const OKUS_COLUMN_W = 2 * OKUS_R;
+
+// Per-panel row offsets for harvest wrap
+const PLAYER_ROW_OFFSET = HARVEST_H + 6; // non-overlap (76)
+const OPP_ROW_OFFSET = 28; // vertical peek for opp — comfortably shows rank+suit corner
+
+const ITEM_GAP = 12;
+const IDENTITY_HEIGHT_OPP = PANEL_PAD; // identity text overlaps top pad area (rendered in left zone)
+const LUMINARY_NAMES = ['River', 'Maiden', 'Drought', 'Boat', 'Loom', 'Rake', 'Echo', 'ForestQ'];
+
+// Reserved horizontal space for luminary+okus area (CONSTANT, regardless of luminary count).
+// From right: okus_column(20) + ITEM_GAP + luminary(55) + ITEM_GAP = 99 wide before harvest
+const HARVEST_RIGHT_X = (RIGHT_ANCHOR - OKUS_COLUMN_W - ITEM_GAP) - LUMINARY_W - ITEM_GAP;
+
+// LOCKED-IN hand fan parameters (no longer adjustable)
+const HAND_PIVOT_X = 1562;
+const HAND_PIVOT_Y = 1800;
+const HAND_R = 630;
+const HAND_ARC = 27.5;
+const HAND_CARD_W = 225;
+const HAND_CARD_H = 315;
+const HAND_N = 4;
+
+const inputs = {
+  harvestP: { range: 'harvestP', num: 'harvestPNum', val: 'harvestPVal', def: 14 },
+  harvest1: { range: 'harvest1', num: 'harvest1Num', val: 'harvest1Val', def: 7 },
+  harvest2: { range: 'harvest2', num: 'harvest2Num', val: 'harvest2Val', def: 3 },
+  harvest3: { range: 'harvest3', num: 'harvest3Num', val: 'harvest3Val', def: 5 },
+  lumP: { range: 'lumP', num: 'lumPNum', val: 'lumPVal', def: 1 },
+  lum1: { range: 'lum1', num: 'lum1Num', val: 'lum1Val', def: 1 },
+  lum2: { range: 'lum2', num: 'lum2Num', val: 'lum2Val', def: 0 },
+  lum3: { range: 'lum3', num: 'lum3Num', val: 'lum3Val', def: 0 },
+  okusP: { range: 'okusP', num: 'okusPNum', val: 'okusPVal', def: 2 },
+  okus1: { range: 'okus1', num: 'okus1Num', val: 'okus1Val', def: 1 },
+  okus2: { range: 'okus2', num: 'okus2Num', val: 'okus2Val', def: 1 },
+  okus3: { range: 'okus3', num: 'okus3Num', val: 'okus3Val', def: 0 },
+};
+
+function getVal(key) { return Number(document.getElementById(inputs[key].range).value); }
+function setVal(key, v) {
+  const cfg = inputs[key];
+  document.getElementById(cfg.range).value = v;
+  document.getElementById(cfg.num).value = v;
+  document.getElementById(cfg.val).textContent = v;
+}
+
+function getAngles(n, arc) {
+  if (n === 1) return [0];
+  const baseSpacing = 15;
+  const arcSpacing = arc / (n - 1);
+  const spacing = Math.min(baseSpacing, arcSpacing);
+  const start = -((n - 1) / 2) * spacing;
+  return Array.from({length: n}, (_, i) => start + i * spacing);
+}
+
+function bottomMid(angle, cx, cy, r) {
+  const rad = angle * Math.PI / 180;
+  return { x: cx + r * Math.sin(rad), y: cy - r * Math.cos(rad) };
+}
+
+function fanLeftmostOffset(angles, r, cw, ch) {
+  let minOffset = Infinity;
+  angles.forEach(angleDeg => {
+    const rad = angleDeg * Math.PI / 180;
+    const bmXOffset = r * Math.sin(rad);
+    const cosT = Math.cos(rad);
+    const sinT = Math.sin(rad);
+    [[-cw/2, 0], [cw/2, 0], [-cw/2, -ch], [cw/2, -ch]].forEach(([dx, dy]) => {
+      const xRot = dx * cosT - dy * sinT;
+      const xAbs = bmXOffset + xRot;
+      if (xAbs < minOffset) minOffset = xAbs;
+    });
+  });
+  return minOffset;
+}
+
+const SUITS = [
+  { rank: 'F', sym: '★', col: '#9a8030' },
+  { rank: 'K', sym: '♠', col: '#2a2a2a' },
+  { rank: '3', sym: '♦', col: '#b54040' },
+  { rank: '7', sym: '♥', col: '#b54040' },
+  { rank: '5', sym: '♣', col: '#2a2a2a' },
+  { rank: '9', sym: '♦', col: '#b54040' },
+  { rank: 'Q', sym: '♠', col: '#2a2a2a' },
+  { rank: '2', sym: '♥', col: '#b54040' },
+  { rank: '4', sym: '♣', col: '#2a2a2a' },
+  { rank: '6', sym: '♥', col: '#b54040' },
+  { rank: '8', sym: '♠', col: '#2a2a2a' },
+  { rank: 'J', sym: '♦', col: '#b54040' },
+  { rank: '10', sym: '♣', col: '#2a2a2a' },
+  { rank: 'A', sym: '★', col: '#9a8030' },
+];
+
+function renderCard(angle, cx, cy, r, w, h, suit) {
+  const bm = bottomMid(angle, cx, cy, r);
+  const rectX = bm.x - w / 2;
+  const rectY = bm.y - h;
+  const rankFontSize = Math.max(14, w * 0.15);
+  const suitFontSize = Math.max(18, w * 0.18);
+  const bigSuitFontSize = Math.max(28, w * 0.32);
+  const inset = Math.max(8, w * 0.05);
+  return `
+    <g transform="rotate(${angle.toFixed(3)} ${bm.x.toFixed(2)} ${bm.y.toFixed(2)})">
+      <rect x="${(rectX + 4).toFixed(2)}" y="${(rectY + 4).toFixed(2)}" width="${w}" height="${h}" rx="10" fill="#000" opacity="0.35"/>
+      <rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${w}" height="${h}" rx="10" fill="#f5ecd8" stroke="#8a7858" stroke-width="1.5"/>
+      <text x="${(rectX + inset).toFixed(2)}" y="${(rectY + inset + rankFontSize).toFixed(2)}" font-family="serif" font-size="${rankFontSize.toFixed(1)}" font-weight="bold" fill="#2a2a2a">${suit.rank}</text>
+      <text x="${(rectX + inset).toFixed(2)}" y="${(rectY + inset + rankFontSize + suitFontSize + 2).toFixed(2)}" font-family="serif" font-size="${suitFontSize.toFixed(1)}" fill="${suit.col}">${suit.sym}</text>
+      <text x="${bm.x.toFixed(2)}" y="${(rectY + h * 0.55).toFixed(2)}" font-family="serif" font-size="${bigSuitFontSize.toFixed(1)}" text-anchor="middle" fill="${suit.col}">${suit.sym}</text>
+    </g>
+  `;
+}
+
+function renderCardBack(angle, cx, cy, r, w, h) {
+  const bm = bottomMid(angle, cx, cy, r);
+  const rectX = bm.x - w / 2;
+  const rectY = bm.y - h;
+  const radius = Math.max(3, w * 0.06);
+  return `
+    <g transform="rotate(${angle.toFixed(3)} ${bm.x.toFixed(2)} ${bm.y.toFixed(2)})">
+      <rect x="${(rectX + 2).toFixed(2)}" y="${(rectY + 2).toFixed(2)}" width="${w}" height="${h}" rx="${radius}" fill="#000" opacity="0.35"/>
+      <rect x="${rectX.toFixed(2)}" y="${rectY.toFixed(2)}" width="${w}" height="${h}" rx="${radius}" fill="#3a2a55" stroke="#7a5a95" stroke-width="1"/>
+      <rect x="${(rectX + w * 0.12).toFixed(2)}" y="${(rectY + h * 0.12).toFixed(2)}" width="${(w * 0.76).toFixed(2)}" height="${(h * 0.76).toFixed(2)}" rx="${(radius * 0.6).toFixed(2)}" fill="url(#cardBackPat)" stroke="#5a3a75" stroke-width="0.5"/>
+    </g>
+  `;
+}
+
+function renderHarvestCard(x, y, w, h, suit) {
+  const rankSize = Math.max(8, w * 0.22);
+  const suitSize = Math.max(8, w * 0.22);
+  const inset = Math.max(2, w * 0.08);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  return `
+    <rect x="${(x + 1.5).toFixed(2)}" y="${(y + 1.5).toFixed(2)}" width="${w}" height="${h}" rx="3" fill="#000" opacity="0.3"/>
+    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w}" height="${h}" rx="3" fill="#f5ecd8" stroke="#8a7858" stroke-width="0.6"/>
+    <text x="${(x + inset).toFixed(2)}" y="${(y + inset + rankSize).toFixed(2)}" font-family="serif" font-size="${rankSize.toFixed(1)}" font-weight="bold" fill="#2a2a2a">${suit.rank}</text>
+    <text x="${(x + inset).toFixed(2)}" y="${(y + inset + rankSize + suitSize).toFixed(2)}" font-family="serif" font-size="${suitSize.toFixed(1)}" fill="${suit.col}">${suit.sym}</text>
+    <g transform="rotate(180 ${cx.toFixed(2)} ${cy.toFixed(2)})">
+      <text x="${(x + inset).toFixed(2)}" y="${(y + inset + rankSize).toFixed(2)}" font-family="serif" font-size="${rankSize.toFixed(1)}" font-weight="bold" fill="#2a2a2a">${suit.rank}</text>
+      <text x="${(x + inset).toFixed(2)}" y="${(y + inset + rankSize + suitSize).toFixed(2)}" font-family="serif" font-size="${suitSize.toFixed(1)}" fill="${suit.col}">${suit.sym}</text>
+    </g>
+  `;
+}
+
+function renderLuminaryCard(x, y, w, h, name) {
+  const nameSize = Math.max(8, w * 0.22);
+  return `
+    <rect x="${(x + 1.5).toFixed(2)}" y="${(y + 1.5).toFixed(2)}" width="${w}" height="${h}" rx="4" fill="#000" opacity="0.3"/>
+    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w}" height="${h}" rx="4" fill="#3a2055" stroke="#a080c0" stroke-width="1"/>
+    <text x="${(x + w/2).toFixed(2)}" y="${(y + h/2 + nameSize/3).toFixed(2)}" font-family="serif" font-size="${nameSize.toFixed(1)}" fill="#e8d8f0" text-anchor="middle" font-weight="bold">${name}</text>
+  `;
+}
+
+// Compute cards-per-row given the available width.
+function cardsPerRow(availableWidth, cardW, peek) {
+  if (cardW > availableWidth) return 1;
+  return Math.max(1, Math.floor((availableWidth - cardW) / peek) + 1);
+}
+
+// Wrapped left-justified rows. Every row flows the same direction (LEFT to RIGHT).
+// Within each row: oldest at left, newest at right. Render order left-to-right so RIGHTMOST is on top.
+// Across rows: oldest row at top, newer rows below. Newer rows render after, on top of older ones.
+// With vertical row overlap, only the TOP-LEFT corner of each card peeks (showing rank+suit).
+function renderHarvestWrapped(cards, leftAnchor, rightLimit, topY, w, h, peek, rowOffset) {
+  const availableWidth = rightLimit - leftAnchor;
+  const cpr = cardsPerRow(availableWidth, w, peek);
+  const rows = [];
+  for (let i = 0; i < cards.length; i += cpr) {
+    rows.push(cards.slice(i, i + cpr));
+  }
+  let out = '';
+  rows.forEach((rowCards, rowIdx) => {
+    const rowY = topY + rowIdx * rowOffset;
+    for (let i = 0; i < rowCards.length; i++) {
+      const x = leftAnchor + i * peek;
+      out += renderHarvestCard(x, rowY, w, h, rowCards[i]);
+    }
+  });
+  return { svg: out, rowCount: rows.length, cpr };
+}
+
+// Render claimed luminaries as a downward stack.
+// Each successive luminary tucks BELOW the previous one with a small peek showing at the top.
+// Render oldest first (at top y), newest last (further down). Newest renders on top.
+// Returns the SVG and the final y extent of the stack (for layout).
+function renderLuminaryStackDown(names, x, topY, w, h, peek) {
+  let out = '';
+  names.forEach((name, i) => {
+    const y = topY + i * peek;
+    out += renderLuminaryCard(x, y, w, h, name);
+  });
+  const totalH = h + Math.max(0, names.length - 1) * peek;
+  return { svg: out, totalH };
+}
+
+// Render okus chips as 1x4 vertical column, right-anchored at rightX, top at topY.
+// NO placeholders — only render `count` claimed chips at the top of the column.
+function renderOkusColumn(rightX, topY, count, chipR, gap) {
+  let out = '';
+  const cx = rightX - chipR;
+  for (let i = 0; i < count; i++) {
+    const cy = topY + i * (2 * chipR + gap) + chipR;
+    out += `<circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${chipR}" fill="url(#okusGrad)" stroke="#3a2818" stroke-width="0.6"/>`;
+  }
+  return out;
+}
+
+// Opp panel: identity at top, items below.
+// Luminary+okus horizontal space is RESERVED (constant) — harvest right edge fixed at HARVEST_RIGHT_X.
+function renderOppCollected(slotTopY, harvestCards, luminaryNames, okusCount) {
+  const rowTopY = slotTopY + IDENTITY_HEIGHT_OPP;
+  const okusRight = RIGHT_ANCHOR;
+  const okusLeft = okusRight - OKUS_COLUMN_W;
+  let out = renderOkusColumn(okusRight, rowTopY, okusCount, OKUS_R, OKUS_GAP);
+
+  const lumX = okusLeft - ITEM_GAP - LUMINARY_W;
+  if (luminaryNames.length > 0) {
+    const lumRes = renderLuminaryStackDown(luminaryNames, lumX, rowTopY, LUMINARY_W, LUMINARY_H, LUM_STACK_PEEK);
+    out += lumRes.svg;
+  }
+
+  const harvestRes = renderHarvestWrapped(
+    harvestCards, COLLECTED_LEFT_LIMIT, HARVEST_RIGHT_X, rowTopY,
+    HARVEST_W, HARVEST_H, HARVEST_PEEK, OPP_ROW_OFFSET
+  );
+  out += harvestRes.svg;
+  return out;
+}
+
+function renderPlayerCollected(harvestN, luminaries, okusCount) {
+  const slotTopY = 675;
+  const rowTopY = slotTopY + PANEL_TOP_PAD;
+  const okusRight = RIGHT_ANCHOR;
+  const okusLeft = okusRight - OKUS_COLUMN_W;
+  let out = renderOkusColumn(okusRight, rowTopY, okusCount, OKUS_R, OKUS_GAP);
+
+  const lumX = okusLeft - ITEM_GAP - LUMINARY_W;
+  if (luminaries.length > 0) {
+    const lumRes = renderLuminaryStackDown(luminaries, lumX, rowTopY, LUMINARY_W, LUMINARY_H, LUM_STACK_PEEK);
+    out += lumRes.svg;
+  }
+
+  const cards = Array.from({length: harvestN}, (_, i) => SUITS[i % SUITS.length]);
+  const harvestRes = renderHarvestWrapped(
+    cards, COLLECTED_LEFT_LIMIT, HARVEST_RIGHT_X, rowTopY,
+    HARVEST_W, HARVEST_H, HARVEST_PEEK, PLAYER_ROW_OFFSET
+  );
+  out += harvestRes.svg;
+  return { svg: out, rowCount: harvestRes.rowCount, cpr: harvestRes.cpr };
+}
+
+function buildHarvestSample(n) {
+  return Array.from({length: n}, (_, i) => SUITS[i % SUITS.length]);
+}
+
+function render() {
+  const angles = getAngles(HAND_N, HAND_ARC);
+  document.getElementById('hand').innerHTML = angles.map((a, i) =>
+    renderCard(a, HAND_PIVOT_X, HAND_PIVOT_Y, HAND_R, HAND_CARD_W, HAND_CARD_H, SUITS[i % SUITS.length])
+  ).join('');
+
+  const opps = [
+    { fan: 'oppFan1', col: 'oppCollected1', slotTop: 270, slotBot: 405,
+      harvest: buildHarvestSample(getVal('harvest1')),
+      luminaries: LUMINARY_NAMES.slice(0, getVal('lum1')),
+      okus: getVal('okus1') },
+    { fan: 'oppFan2', col: 'oppCollected2', slotTop: 405, slotBot: 540,
+      harvest: buildHarvestSample(getVal('harvest2')),
+      luminaries: LUMINARY_NAMES.slice(0, getVal('lum2')),
+      okus: getVal('okus2') },
+    { fan: 'oppFan3', col: 'oppCollected3', slotTop: 540, slotBot: 675,
+      harvest: buildHarvestSample(getVal('harvest3')),
+      luminaries: LUMINARY_NAMES.slice(0, getVal('lum3')),
+      okus: getVal('okus3') },
+  ];
+  opps.forEach(o => {
+    document.getElementById(o.fan).innerHTML = renderOppFan(o.slotBot, HAND_N, HAND_ARC);
+    document.getElementById(o.col).innerHTML = renderOppCollected(o.slotTop, o.harvest, o.luminaries, o.okus);
+  });
+
+  const playerLums = LUMINARY_NAMES.slice(0, getVal('lumP'));
+  const playerRes = renderPlayerCollected(getVal('harvestP'), playerLums, getVal('okusP'));
+  document.getElementById('playerCollected').innerHTML = playerRes.svg;
+
+  document.getElementById('rowsPInfo').textContent = playerRes.rowCount;
+  document.getElementById('cprInfo').textContent = playerRes.cpr;
+
+  // Pivot marker not rendered (hand locked, no need)
+  document.getElementById('pivotMarker').innerHTML = '';
+}
+
+function renderOppFan(slotBottomY, n, arc) {
+  const cw = HAND_CARD_W * SCALE;
+  const ch = HAND_CARD_H * SCALE;
+  const r = HAND_R * SCALE;
+  const playerOffset = HAND_PIVOT_Y - SCREEN_BOTTOM;
+  const oppOffset = playerOffset * SCALE;
+  const oppCy = slotBottomY + oppOffset;
+  const angles = getAngles(n, arc);
+  const leftmostOffset = fanLeftmostOffset(angles, r, cw, ch);
+  const oppCx = RIGHT_COL_LEFT + OPP_LEFT_PAD - leftmostOffset;
+  return angles.map(a => renderCardBack(a, oppCx, oppCy, r, cw, ch)).join('');
+}
+
+function bind() {
+  Object.entries(inputs).forEach(([key, cfg]) => {
+    const range = document.getElementById(cfg.range);
+    const num = document.getElementById(cfg.num);
+    const val = document.getElementById(cfg.val);
+    range.addEventListener('input', () => {
+      num.value = range.value;
+      val.textContent = range.value;
+      render();
+    });
+    num.addEventListener('input', () => {
+      const v = Number(num.value);
+      if (!Number.isNaN(v)) {
+        range.value = v;
+        val.textContent = v;
+        render();
+      }
+    });
+  });
+}
+
+bind();
+render();
+</script>
+
+</body>
+</html>
